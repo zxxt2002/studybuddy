@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ChatGPT File-Upload Bot</title>
+</head>
+<body>
+  <h1>ChatGPT File-Upload Chatbot</h1>
+  <textarea id="prompt" rows="4" cols="60"
+    placeholder="Enter your question here…"></textarea><br>
+  <input type="file" id="fileInput"><br><br>
+  <button id="send">Send</button>
+
+  <h2>Response:</h2>
+  <pre id="response"></pre>
+
+  <script>
+    document.getElementById('send').onclick = async () => {
+      const prompt = document.getElementById('prompt').value
+      const fileInput = document.getElementById('fileInput')
+      const form = new FormData()
+      form.append('prompt', prompt)
+      if (fileInput.files[0]) {
+        form.append('file', fileInput.files[0])
+      }
+
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        body: form
+      })
+      const data = await res.json()
+      document.getElementById('response').textContent =
+        data.error ? `Error: ${data.error}` : data.reply
+    }
+  </script>
+</body>
+</html>
