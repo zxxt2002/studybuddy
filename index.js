@@ -1,7 +1,7 @@
 import express from 'express'
 import multer from 'multer'
 import dotenv from 'dotenv'
-import OpenAI from 'openai'
+//import OpenAI from 'openai'
 import pdfjs from 'pdfjs-dist/legacy/build/pdf.js';
 const { getDocument } = pdfjs;
 import { createWorker } from 'tesseract.js'
@@ -10,9 +10,18 @@ dotenv.config()
 
 const app = express()
 const upload = multer()
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-})
+// const openai = new OpenAI({
+//   apiKey: process.env.OPENAI_API_KEY
+// })
+
+// Import Google Gemini client:
+import pkg from '@google-ai/generativelanguage';
+const {v1beta3} = pkg;
+const {TextServiceClient} = v1beta3;
+// If you’re using API-key instead of service account, pass it in options:
+const gemini = new TextServiceClient({
+  libOptions: { apiKey: process.env.GOOGLE_API_KEY }
+});
 
 app.use(express.json())
 app.use(express.static('public'))
@@ -71,12 +80,22 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
     const fileContent = await parseUploadedFile(req.file)
     const combinedPrompt = buildPrompt(prompt || '', fileContent)
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: combinedPrompt }],
-    })
+    // const completion = await openai.chat.completions.create({
+    //   model: 'gpt-4o-mini',
+    //   messages: [{ role: 'user', content: combinedPrompt }],
+    // })
 
-    res.json({ reply: completion.choices?.[0]?.message?.content ?? '' })
+    // res.json({ reply: completion.choices?.[0]?.message?.content ?? '' })
+
+    // Call Gemini (chat-bison-001 is Gemini “chat” model)
+    const [response] = await gemini.generateText({
+      model: 'models/chat-bison-001',
+      prompt: { text: combinedPrompt },
+      temperature: 0.7,
+      candidateCount: 1,
+    })
+    const reply = response.candidates?.[0]?.content || ''
+    res.json({ reply })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: err.message })
