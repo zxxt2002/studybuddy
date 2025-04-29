@@ -5,6 +5,7 @@ import dotenv from 'dotenv'
 import pdfjs from 'pdfjs-dist/legacy/build/pdf.js';
 const { getDocument } = pdfjs;
 import { createWorker } from 'tesseract.js'
+import { GoogleGenAI } from "@google/genai";
 
 dotenv.config()
 
@@ -16,12 +17,13 @@ const upload = multer()
 
 // Import Google Gemini client:
 import pkg from '@google-ai/generativelanguage';
-const {v1beta3} = pkg;
-const {TextServiceClient} = v1beta3;
+const { v1beta3 } = pkg;
+const { TextServiceClient } = v1beta3;
 // If you’re using API-key instead of service account, pass it in options:
-const gemini = new TextServiceClient({
-  libOptions: { apiKey: process.env.GOOGLE_API_KEY }
-});
+const gemini = new TextServiceClient({ apiKey: process.env.GOOGLE_API_KEY, fallback: true });
+
+// **New**: instantiate the GenAI SDK
+const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
 
 app.use(express.json())
 app.use(express.static('public'))
@@ -36,7 +38,7 @@ async function parseUploadedFile(file) {
     // New parse logic using pdfjs-dist
     const loadingTask = getDocument({ data: file.buffer });
     const pdfDocument = await loadingTask.promise;
-    
+
     let textContent = '';
 
     for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
@@ -63,7 +65,19 @@ async function parseUploadedFile(file) {
 // Helper function for prompt engineering
 function buildPrompt(userInput, fileContent) {
   return `
-You are a helpful assistant.
+[Follow-Up Instructions]
+You are a Socratic AI tutor
+1. Ask a single, focused question that drills deeper into the student’s last reply about one of those topics.  
+2. Never introduce or teach anything outside the approved topics.  
+3. If the student’s answer implies a missing prerequisite, you *may* offer:  
+   “It looks like you’re using [prerequisite]. Would you like a one-sentence refresher, or keep focusing on [currentTopic]?”  
+4. If you ever stray, immediately ask:  
+   “How does that relate back to [currentTopic]?”  
+5. Continue until student indicates an established understanding of the topic
+6. Don't dwell too much on the small details, make sure you still challenge the student to learn the described material.
+7. If a student says no, or they don't understand, don't ask them why, try to find a simpler question to help them out.
+
+Now, based on the student’s last message below, produce your next question only.
 
 User question:
 "${userInput}"
@@ -77,24 +91,16 @@ Please provide a clear and complete answer.
 app.post('/api/chat', upload.single('file'), async (req, res) => {
   try {
     const { prompt } = req.body
-    const fileContent = await parseUploadedFile(req.file)
+    const fileContent    = await parseUploadedFile(req.file)
     const combinedPrompt = buildPrompt(prompt || '', fileContent)
 
-    // const completion = await openai.chat.completions.create({
-    //   model: 'gpt-4o-mini',
-    //   messages: [{ role: 'user', content: combinedPrompt }],
-    // })
+    // ← REPLACED: use GoogleGenAI.generateContent instead of gemini.generateText
+    const response = await ai.models.generateContent({
+      model:    "gemini-2.0-flash",
+      contents: combinedPrompt,
+    });
+    const reply = response.text
 
-    // res.json({ reply: completion.choices?.[0]?.message?.content ?? '' })
-
-    // Call Gemini (chat-bison-001 is Gemini “chat” model)
-    const [response] = await gemini.generateText({
-      model: 'models/chat-bison-001',
-      prompt: { text: combinedPrompt },
-      temperature: 0.7,
-      candidateCount: 1,
-    })
-    const reply = response.candidates?.[0]?.content || ''
     res.json({ reply })
   } catch (err) {
     console.error(err)
@@ -117,4 +123,3 @@ const PORT = process.env.PORT || 3000
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`)
 })
-
