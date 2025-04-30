@@ -3,6 +3,7 @@ import multer from 'multer'
 import dotenv from 'dotenv'
 import fetch, { Headers } from 'node-fetch'
 import pdfjs from 'pdfjs-dist/legacy/build/pdf.js'
+const { getDocument } = pdfjs
 import { createWorker } from 'tesseract.js'
 import { GoogleGenAI } from "@google/genai"
 import { buildPrompt, buildRetryPrompt } from './utils/promptEngineer.js'
