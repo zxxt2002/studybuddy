@@ -1,11 +1,16 @@
 import express from 'express'
 import multer from 'multer'
 import dotenv from 'dotenv'
-//import OpenAI from 'openai'
-import pdfjs from 'pdfjs-dist/legacy/build/pdf.js';
-const { getDocument } = pdfjs;
+import fetch, { Headers } from 'node-fetch'
+import pdfjs from 'pdfjs-dist/legacy/build/pdf.js'
 import { createWorker } from 'tesseract.js'
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI } from "@google/genai"
+import { buildPrompt, buildRetryPrompt } from './utils/promptEngineer.js'
+import { validateResponse } from './utils/responseValidator.js'
+
+// Set up global fetch and Headers
+global.fetch = fetch
+global.Headers = Headers
 
 dotenv.config()
 
@@ -19,7 +24,7 @@ const upload = multer()
 import pkg from '@google-ai/generativelanguage';
 const { v1beta3 } = pkg;
 const { TextServiceClient } = v1beta3;
-// If you’re using API-key instead of service account, pass it in options:
+// If you're using API-key instead of service account, pass it in options:
 const gemini = new TextServiceClient({ apiKey: process.env.GOOGLE_API_KEY, fallback: true });
 
 // **New**: instantiate the GenAI SDK
@@ -61,47 +66,30 @@ async function parseUploadedFile(file) {
   }
 }
 
-
-// Helper function for prompt engineering
-function buildPrompt(userInput, fileContent) {
-  return `
-[Follow-Up Instructions]
-You are a Socratic AI tutor
-1. Ask a single, focused question that drills deeper into the student’s last reply about one of those topics.  
-2. Never introduce or teach anything outside the approved topics.  
-3. If the student’s answer implies a missing prerequisite, you *may* offer:  
-   “It looks like you’re using [prerequisite]. Would you like a one-sentence refresher, or keep focusing on [currentTopic]?”  
-4. If you ever stray, immediately ask:  
-   “How does that relate back to [currentTopic]?”  
-5. Continue until student indicates an established understanding of the topic
-6. Don't dwell too much on the small details, make sure you still challenge the student to learn the described material.
-7. If a student says no, or they don't understand, don't ask them why, try to find a simpler question to help them out.
-
-Now, based on the student’s last message below, produce your next question only.
-
-User question:
-"${userInput}"
-
-${fileContent ? `Attached file content:\n${fileContent}` : ''}
-
-Please provide a clear and complete answer.
-  `.trim()
-}
-
 app.post('/api/chat', upload.single('file'), async (req, res) => {
   try {
     const { prompt } = req.body
-    const fileContent    = await parseUploadedFile(req.file)
+    const fileContent = await parseUploadedFile(req.file)
     const combinedPrompt = buildPrompt(prompt || '', fileContent)
 
-    // ← REPLACED: use GoogleGenAI.generateContent instead of gemini.generateText
     const response = await ai.models.generateContent({
-      model:    "gemini-2.0-flash",
+      model: "gemini-2.0-flash",
       contents: combinedPrompt,
-    });
+    })
+    
     const reply = response.text
-
-    res.json({ reply })
+    const validation = validateResponse(reply)
+    
+    if (!validation.isValid) {
+      const retryPrompt = buildRetryPrompt(combinedPrompt)
+      const retryResponse = await ai.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: retryPrompt,
+      })
+      res.json({ reply: retryResponse.text })
+    } else {
+      res.json({ reply })
+    }
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: err.message })
