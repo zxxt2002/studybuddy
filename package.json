@@ -1,10 +1,13 @@
 {
   "type": "module",
-  "name": "STUDDYBUDDY",
+  "name": "STUDYBUDDY",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node server/index.js",          
+    "dev:server": "nodemon server/index.js",   
+    "dev:client": "vite",                      
+    "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\""
   },
   "dependencies": {
     "@google-ai/generativelanguage": "^3.1.0",
@@ -16,5 +19,11 @@
     "openai": "^4.3.1",
     "pdfjs-dist": "^2.16.105",
     "tesseract.js": "^6.0.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.4.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "vite": "^6.3.4"
   }
 }

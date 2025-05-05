@@ -6,14 +6,16 @@ import pdfjs from 'pdfjs-dist/legacy/build/pdf.js'
 const { getDocument } = pdfjs
 import { createWorker } from 'tesseract.js'
 import { GoogleGenAI } from "@google/genai"
-import { buildPrompt, buildRetryPrompt } from './utils/promptEngineer.js'
-import { validateResponse } from './utils/responseValidator.js'
+import { buildPrompt, buildRetryPrompt } from '../utils/promptEngineer.js'
+import { validateResponse } from '../utils/responseValidator.js'
 
 // Set up global fetch and Headers
 global.fetch = fetch
 global.Headers = Headers
 
 dotenv.config()
+
+// …
 
 const app = express()
 const upload = multer()
@@ -32,7 +34,6 @@ const gemini = new TextServiceClient({ apiKey: process.env.GOOGLE_API_KEY, fallb
 const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
 
 app.use(express.json())
-app.use(express.static('public'))
 
 // Helper function to parse uploaded file
 async function parseUploadedFile(file) {
