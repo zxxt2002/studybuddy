@@ -98,6 +98,21 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
   }
 })
 
+app.post('/api/hint', express.json(), async (req, res) => {
+  try {
+    const { prompt } = req.body;
+    const hintPrompt = `You are an expert tutor. Give a concise hint to help the user answer the previous question:\n"${prompt}"`;
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: hintPrompt,
+    });
+    res.json({ hint: response.text });
+  } catch (err) {
+    console.error('Hint API error:', err);
+    res.status(500).json({ hint: `Error: ${err.message}` });
+  }
+});
+
 // Testing endpoint: Parse file and return parsed text (no OpenAI)
 app.post('/api/parse', upload.single('file'), async (req, res) => {
   try {

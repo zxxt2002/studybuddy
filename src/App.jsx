@@ -1,11 +1,15 @@
 // src/App.jsx
 import 'bootstrap/dist/css/bootstrap.min.css';
 import React, { useState } from 'react';
+import HintPopup from './components/HintPopup';
 
 export default function App() {
   const [prompt, setPrompt] = useState('');
   const [file, setFile] = useState(null);
   const [response, setResponse] = useState('');
+  const [showHint, setShowHint] = useState(false);
+  const [hintText, setHintText] = useState('');
+  const [hintLoading, setHintLoading] = useState(false);
 
   const handleSend = async () => {
     const form = new FormData();
@@ -23,6 +27,24 @@ export default function App() {
       setResponse(`Error: ${err.message}`);
     }
   };
+  const handleGetHint = async () => {
+    setHintLoading(true);
+    try {
+      const res = await fetch('/api/hint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await res.json();
+      setHintText(data.hint || 'No hint available');
+      setShowHint(true);
+    } catch (err) {
+      setHintText(`Error: ${err.message}`);
+      setShowHint(true);
+    } finally {
+      setHintLoading(false);
+    }
+  };
 
   return (
     <div className="container py-4">
@@ -36,6 +58,17 @@ export default function App() {
       >
         {response}
       </pre>
+
+      {/* Hint trigger */}
+      <div className="text-end mb-2">
+        <button
+          className="btn btn-link"
+          onClick={handleGetHint}
+          disabled={hintLoading}
+        >
+          {hintLoading ? 'Loading hint...' : 'Need a hint?'}
+        </button>
+      </div>
 
       {/* Question textarea */}
       <div className="mb-4">
@@ -71,6 +104,13 @@ export default function App() {
           </button>
         </div>
       </div>
+      {/* Hint Popup Component */}
+      <HintPopup
+        show={showHint}
+        handleClose={() => setShowHint(false)}
+        hintText={hintText}
+        loading={hintLoading}
+      />
     </div>
   );
 }
