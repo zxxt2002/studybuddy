@@ -67,6 +67,7 @@ async function parseUploadedFile(file) {
     return '[Unsupported file type uploaded]'
   }
 }
+var prev_response = '';
 
 app.post('/api/chat', upload.single('file'), async (req, res) => {
   try {
@@ -80,6 +81,7 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
     })
     
     const reply = response.text
+    prev_response = reply
     const validation = validateResponse(reply)
     
     if (!validation.isValid) {
@@ -101,7 +103,7 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
 app.post('/api/hint', express.json(), async (req, res) => {
   try {
     const { prompt } = req.body;
-    const hintPrompt = `You are an expert tutor. Give a concise hint to help the user answer the previous question:\n"${prompt}"`;
+    const hintPrompt = `You are an expert tutor. Give a concise hint to help the user answer question:\n"${prev_response}"`;
     const response = await ai.models.generateContent({
       model: 'gemini-2.0-flash',
       contents: hintPrompt,
