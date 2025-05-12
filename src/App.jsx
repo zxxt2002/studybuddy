@@ -26,7 +26,7 @@ export default function App() {
 
   return (
     <div className="container py-4">
-      <h1 className="mb-4 text-center">STUDY BUDDY</h1>
+      <img src="StudyBuddyLogo.png" alt="Study Buddy Logo" className="logo" style={{ height: '75px' }} />
 
       {/* Response section above inputs */}
       <h2 className="mb-2">Response:</h2>
