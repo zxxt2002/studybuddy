@@ -16,7 +16,11 @@ export default function App() {
     localStorage.setItem('conversation', JSON.stringify(conversation));
   }, [conversation]);
 
-  const handleClearConversation = () => {
+  const handleClearConversation = async () => {
+    await fetch('/api/outline/reset', {
+    method: 'POST',
+    credentials: 'include'
+    }); 
     setConversation([]);
     localStorage.removeItem('conversation');
   };
@@ -43,6 +47,7 @@ export default function App() {
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
+        credentials: 'include',
         body: form,
       });
       const data = await res.json();
