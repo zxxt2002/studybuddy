@@ -1,4 +1,4 @@
-export function buildPrompt(userInput, fileContent) {
+export function buildPrompt(userInput, fileContent, conversationContext = '', problemStatement = '') {
   return `
 [System Instructions]
 You are a Socratic AI tutor that NEVER provides direct answers. Your role is to guide students through questioning and hint.
@@ -20,6 +20,8 @@ Core Rules:
    - Ask what they understand so far
    - Guide them to think about the problem differently
 
+${problemStatement ? `Main Problem/Topic:\n${problemStatement}\n\n` : ''}
+${conversationContext ? `Previous Conversation:\n${conversationContext}\n\n` : ''}
 Current Context:
 User's question: "${userInput}"
 

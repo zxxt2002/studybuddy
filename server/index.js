@@ -70,9 +70,23 @@ async function parseUploadedFile(file) {
 
 app.post('/api/chat', upload.single('file'), async (req, res) => {
   try {
-    const { prompt } = req.body
+    const { prompt, conversation, problemStatement } = req.body
     const fileContent = await parseUploadedFile(req.file)
-    const combinedPrompt = buildPrompt(prompt || '', fileContent)
+    
+    // Parse conversation history if it exists
+    let conversationHistory = []
+    try {
+      conversationHistory = conversation ? JSON.parse(conversation) : []
+    } catch (e) {
+      console.error('Error parsing conversation history:', e)
+    }
+
+    // Build conversation context
+    const conversationContext = conversationHistory
+      .map(msg => `${msg.type === 'user' ? 'Student' : 'Tutor'}: ${msg.content}`)
+      .join('\n')
+
+    const combinedPrompt = buildPrompt(prompt || '', fileContent, conversationContext, problemStatement)
 
     const response = await ai.models.generateContent({
       model: "gemini-2.0-flash",
