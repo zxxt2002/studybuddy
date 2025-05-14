@@ -75,7 +75,8 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
     const userInput = (prompt || '').trim()
 
     //initial outline request
-    if (!req.session.parts && userInput.toLowerCase().startsWith('now i want the answer in socratic style')) {
+    if (!req.session.parts 
+        && userInput.toLowerCase().includes('socratic') && userInput.toLowerCase().includes('outline')) {
       // Build the special one-shot outline prompt
       const outlinePrompt = buildOutlinePrompt(userInput, fileContent)
       const outlineResp   = await proseModel.generateContent(outlinePrompt)
@@ -89,12 +90,19 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
 
       // Store outline parts in session
       req.session.parts     = parts
-      req.session.partIndex = 0
+      req.session.partIndex = 1
+      req.session.currentPart = parts[0]
+      req.session.currentIndex = 0
 
+        const content = parts[0]
+        const more = parts.length > 1
       // Return full outline and ask to step through
+      console.log('→ entering outline mode', parts)
       return res.json({
-        reply: outlineText +
-          '\n\nWould you like to go through these parts one by one? (yes/no)'
+        reply: 
+          `### Part 1 / ${parts.length}\n\n` +
+          `${content}\n\n` +
+          `Move on to the next part? (yes/no)`
       })
     }
 
@@ -102,7 +110,8 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
     if (req.session.parts) {
       const answer = userInput.toLowerCase()
       const yesTriggers = ['yes', 'next', 'move into', 'next part']
-      if (yesTriggers.some(t => answer === t)) {
+      const wantsNext = yesTriggers.some(t => answer.includes(t))
+      if (wantsNext) {
         const idx = req.session.partIndex
         if (idx < req.session.parts.length) {
           const content = req.session.parts[idx]
@@ -131,6 +140,34 @@ ${content}
           })
         }
       }
+      //repond with no intention go on next part
+      if (req.session.currentPart) {
+        const idx        = req.session.currentIndex ?? 0
+        const content    = req.session.currentPart
+        const more       = req.session.partIndex < req.session.parts.length
+
+        const repeatPrompt = `
+You are still discussing the part below. Respond with guiding question that
+helps the student think deeper, without revealing the answer.
+
+--- BEGIN PART ---
+${content}
+--- END PART ---
+`
+        const qResp   = await flashModel.generateContent(repeatPrompt)
+        const question = qResp.response.text().trim()
+
+        return res.json({
+          reply:
+            `### Part ${idx + 1} / ${req.session.parts.length}\n\n` +
+            `${content}\n\n` +
+            `**Tutor:** ${question}` +
+            (more
+              ? '\n\nMove on to the next part? (yes/no)'
+              : '\n\nYou’ve completed all parts.')
+        })
+      }
+
     }
 
     // Parse conversation history if it exists
@@ -198,6 +235,7 @@ app.post('/api/outline/reset', (req, res) => {
 
 // Testing endpoint: Parse file and return parsed text (no OpenAI)
 app.post('/api/parse', upload.single('file'), async (req, res) => {
+  const userInput = (prompt || '').trim()
   try {
     const parsedText = await parseUploadedFile(req.file)
     res.json({ parsedText })
@@ -212,7 +250,22 @@ const server = app.listen(PORT, () =>
   console.log(`🚀  Server running on http://localhost:${PORT}`)
 )
 
-//Ensure nodemon restarts don’t leave the old process hanging on port 3000
-for (const sig of ['SIGINT', 'SIGTERM', 'SIGUSR2']) {
-  process.once(sig, () => server.close(() => process.exit(0)))
+function gracefulShutdown(signal) {
+  return () =>
+    server.close(err => {
+      if (err) {
+        console.error('Error during shutdown', err)
+        process.exitCode = 1
+      }
+      // If nodemon triggered the signal, tell it we're done
+      if (signal === 'SIGUSR2') {
+        process.kill(process.pid, 'SIGUSR2')
+      } else {
+        process.exit()
+      }
+    })
 }
+
+process.once('SIGINT',  gracefulShutdown('SIGINT'))   // ^C
+process.once('SIGTERM', gracefulShutdown('SIGTERM'))  // Docker/Heroku
+process.once('SIGUSR2', gracefulShutdown('SIGUSR2'))  // nodemon restart

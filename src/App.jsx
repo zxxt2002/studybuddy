@@ -1,6 +1,7 @@
 // src/App.jsx
 import 'bootstrap/dist/css/bootstrap.min.css';
 import React, { useState, useEffect } from 'react';
+import './App.css';
 
 export default function App() {
   const [prompt, setPrompt] = useState('');
