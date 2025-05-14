@@ -8,8 +8,7 @@
     "dev:client": "vite",
     "dev:server": "nodemon server/index.js",
     "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\""
-  }
-,
+  },
   "dependencies": {
     "@google-ai/generativelanguage": "^3.1.0",
     "@google/genai": "^0.10.0",
@@ -20,6 +19,7 @@
     "node-fetch": "^2.7.0",
     "openai": "^4.3.1",
     "pdfjs-dist": "^2.16.105",
+    "react-router-dom": "^7.6.0",
     "tesseract.js": "^6.0.1"
   },
   "devDependencies": {

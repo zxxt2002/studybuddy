@@ -16,9 +16,6 @@ export default function HintPopup({ show, handleClose, hintText, loading }) {
               : <p>{hintText}</p>
             }
           </div>
-          <div className="modal-footer">
-            <button className="btn btn-secondary" onClick={handleClose}>Close</button>
-          </div>
         </div>
       </div>
     </div>

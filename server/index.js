@@ -79,11 +79,11 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
       model: "gemini-2.0-flash",
       contents: combinedPrompt,
     })
-    
+
     const reply = response.text
     prev_response = reply
     const validation = validateResponse(reply)
-    
+
     if (!validation.isValid) {
       const retryPrompt = buildRetryPrompt(combinedPrompt)
       const retryResponse = await ai.models.generateContent({
@@ -102,9 +102,8 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
 
 app.post('/api/hint', express.json(), async (req, res) => {
   try {
-    const { prompt } = req.body;
     const hintPrompt = `You are an expert tutor. Give a concise hint to help the user answer question:\n"${prev_response}"`;
-    const response = await ai.models.generateContent({
+    const response = await ai.modelsgenerateContent({
       model: 'gemini-2.0-flash',
       contents: hintPrompt,
     });
@@ -113,6 +112,21 @@ app.post('/api/hint', express.json(), async (req, res) => {
     console.error('Hint API error:', err);
     res.status(500).json({ hint: `Error: ${err.message}` });
   }
+});
+
+app.post('/api/summary', express.json(), async (req, res) => {
+  try {
+    const summaryPrompt = `Use useful formatting. The student is asking for a summary of this conservation about this one topic. Include like a score 1-10 of where you think the student's understanding on the current topic(considering the materials and context they gave you). Provide some key points that you talked about with the student and maybe some aspects for them to explore deeper into.`;
+    const response = await ai.modelsgenerateContent({
+      model: 'gemini-2.0-flash',
+      contents: summaryPrompt
+    });
+    res.json({ summary: response.text })
+  } catch (err) {
+    console.error('Summary API error:', err);
+    res.status(500).json({ summary: `Error: ${err.message}` })
+  }
+
 });
 
 // Testing endpoint: Parse file and return parsed text (no OpenAI)

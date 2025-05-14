@@ -2,6 +2,7 @@
 import 'bootstrap/dist/css/bootstrap.min.css';
 import React, { useState } from 'react';
 import HintPopup from './components/HintPopup';
+import SummaryPopup from './components/SummaryPopup';
 
 export default function App() {
   const [prompt, setPrompt] = useState('');
@@ -10,6 +11,9 @@ export default function App() {
   const [showHint, setShowHint] = useState(false);
   const [hintText, setHintText] = useState('');
   const [hintLoading, setHintLoading] = useState(false);
+  const [showSumm, setShowSumm] = useState(false);
+  const [SummText, setSummText] = useState('');
+  const [SummLoading, setSummLoading] = useState(false);
 
   const handleSend = async () => {
     const form = new FormData();
@@ -45,6 +49,24 @@ export default function App() {
       setHintLoading(false);
     }
   };
+  const handleGetSumm = async () => {
+    setSummLoading(true);
+    try {
+      const res = await fetch('/api/summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await res.json();
+      setSummText(data.summary || 'No summary available');
+      setShowSumm(true);
+    } catch (err) {
+      setSummText(`Error: ${err.message}`);
+      setShowSumm(true);
+    } finally {
+      setSummLoading(false);
+    }
+  };
 
   return (
     <div className="container py-4">
@@ -67,6 +89,17 @@ export default function App() {
           disabled={hintLoading}
         >
           {hintLoading ? 'Loading hint...' : 'Need a hint?'}
+        </button>
+      </div>
+
+      {/* Summary */}
+      <div className="text-end mb-2">
+        <button
+          className="btn btn-link"
+          onClick={handleGetSumm}
+          disabled={SummLoading}
+        >
+          {SummLoading ? 'Loading summary...' : 'Show Summary'}
         </button>
       </div>
 
@@ -110,6 +143,12 @@ export default function App() {
         handleClose={() => setShowHint(false)}
         hintText={hintText}
         loading={hintLoading}
+      />
+      <SummaryPopup
+        show={showSumm}
+        handleClose={() => setShowSumm(false)}
+        hintText={SummText}
+        loading={SummLoading}
       />
     </div>
   );
