@@ -70,7 +70,7 @@ async function parseUploadedFile(file) {
 
 app.post('/api/chat', upload.single('file'), async (req, res) => {
   try {
-    const { prompt, conversation } = req.body
+    const { prompt, conversation, problemStatement } = req.body
     const fileContent = await parseUploadedFile(req.file)
     
     // Parse conversation history if it exists
@@ -86,7 +86,7 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
       .map(msg => `${msg.type === 'user' ? 'Student' : 'Tutor'}: ${msg.content}`)
       .join('\n')
 
-    const combinedPrompt = buildPrompt(prompt || '', fileContent, conversationContext)
+    const combinedPrompt = buildPrompt(prompt || '', fileContent, conversationContext, problemStatement)
 
     const response = await ai.models.generateContent({
       model: "gemini-2.0-flash",

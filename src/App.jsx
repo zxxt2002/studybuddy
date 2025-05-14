@@ -5,20 +5,27 @@ import React, { useState, useEffect } from 'react';
 export default function App() {
   const [prompt, setPrompt] = useState('');
   const [file, setFile] = useState(null);
+  const [problemStatement, setProblemStatement] = useState(() => {
+    // Load problem statement from localStorage on initial render
+    return localStorage.getItem('problemStatement') || '';
+  });
   const [conversation, setConversation] = useState(() => {
     // Load conversation from localStorage on initial render
     const savedConversation = localStorage.getItem('conversation');
     return savedConversation ? JSON.parse(savedConversation) : [];
   });
 
-  // Save conversation to localStorage whenever it changes
+  // Save conversation and problem statement to localStorage whenever they change
   useEffect(() => {
     localStorage.setItem('conversation', JSON.stringify(conversation));
-  }, [conversation]);
+    localStorage.setItem('problemStatement', problemStatement);
+  }, [conversation, problemStatement]);
 
   const handleClearConversation = () => {
     setConversation([]);
+    setProblemStatement('');
     localStorage.removeItem('conversation');
+    localStorage.removeItem('problemStatement');
   };
 
   const handleSend = async () => {
@@ -37,8 +44,9 @@ export default function App() {
     const form = new FormData();
     form.append('prompt', prompt);
     if (file) form.append('file', file);
-    // Add conversation history to the request
+    // Add conversation history and problem statement to the request
     form.append('conversation', JSON.stringify(conversation));
+    form.append('problemStatement', problemStatement);
 
     try {
       const res = await fetch('/api/chat', {
@@ -74,11 +82,39 @@ export default function App() {
         <button 
           className="btn btn-outline-danger"
           onClick={handleClearConversation}
-          disabled={conversation.length === 0}
+          disabled={conversation.length === 0 && !problemStatement}
         >
           Clear Conversation
         </button>
       </div>
+
+      {/* Problem Statement Section */}
+      <div className="mb-4">
+        <label htmlFor="problemStatement" className="form-label">
+          Problem Statement
+        </label>
+        <textarea
+          id="problemStatement"
+          className="form-control"
+          rows={2}
+          placeholder="Enter the main problem or topic you want to discuss..."
+          value={problemStatement}
+          onChange={e => setProblemStatement(e.target.value)}
+          disabled={conversation.length > 0}
+        />
+        {conversation.length > 0 && !problemStatement && (
+          <small className="text-danger">
+            Please set a problem statement before starting the conversation
+          </small>
+        )}
+      </div>
+
+      {/* Display current problem statement if set */}
+      {problemStatement && (
+        <div className="alert alert-info mb-4">
+          <strong>Current Problem:</strong> {problemStatement}
+        </div>
+      )}
 
       {/* Conversation history */}
       <div className="conversation-container mb-4" style={{ maxHeight: '500px', overflowY: 'auto' }}>
