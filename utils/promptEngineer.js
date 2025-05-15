@@ -1,7 +1,12 @@
-export function buildOutlinePrompt(userInput, fileContent = '') {
+
+export function buildOutlinePrompt(userInput, fileContent = '', conversationContext = '', problemStatement = '') {
   return `
 now i want the answer in socratic style, give me all the needed knowledge and hint in one reply, but separate the answer into parts based on the knowledge type, with a obvious separation line.
 
+
+${problemStatement ? `Main Problem/Topic:\n${problemStatement}\n\n` : ''}
+${conversationContext ? `Previous Conversation:\n${conversationContext}\n\n` : ''}
+Current Context:
 User's question: "${userInput}"
 ${fileContent ? `\nAttached file:\n${fileContent}` : ''}
 `.trim()

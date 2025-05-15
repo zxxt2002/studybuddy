@@ -70,7 +70,7 @@ app.use(session({
 
 app.post('/api/chat', upload.single('file'), async (req, res) => {
   try {
-    const { prompt, conversation } = req.body
+    const { prompt, conversation, problemStatement } = req.body
     const fileContent = await parseUploadedFile(req.file)
     const userInput = (prompt || '').trim()
 
@@ -183,6 +183,7 @@ ${content}
       .map(msg => `${msg.type === 'user' ? 'Student' : 'Tutor'}: ${msg.content}`)
       .join('\n')
 
+
     //const combinedPrompt = buildPrompt(prompt || '', fileContent, conversationContext)
     // If we’re inside a part-by-part walk-through, give the model that part, too
     const combinedPrompt = buildPrompt(
@@ -193,6 +194,7 @@ ${content}
           ? `\n\nCurrent outline part:\n${req.session.currentPart}`
           : '')
     )
+
 
     const response = await flashModel.generateContent(combinedPrompt)
     const question = response.response.text().trim()
