@@ -11,7 +11,7 @@ const directAnswerIndicators = [
   'this is what'
 ]
 
-export function validateResponse(response) {
+export function validateResponse(response, { allowOutline = false } = {}) {
   // Check if response is a question
   const isQuestion = response.trim().endsWith('?')
   
@@ -21,9 +21,11 @@ export function validateResponse(response) {
   )
   
   if (!isQuestion || containsDirectAnswer) {
-    return {
-      isValid: false,
-      error: 'Response must be a question and not contain direct answers'
+    if (!allowOutline && (!isQuestion || containsDirectAnswer)) {
+      return {
+        isValid: false,
+        error: 'Response must not contain direct answers'
+      }
     }
   }
   

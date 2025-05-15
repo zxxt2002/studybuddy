@@ -1,19 +1,23 @@
-import express from 'express'
 import multer from 'multer'
 import dotenv from 'dotenv'
+dotenv.config()
+import express from 'express'
 import fetch, { Headers } from 'node-fetch'
 import pdfjs from 'pdfjs-dist/legacy/build/pdf.js'
 const { getDocument } = pdfjs
 import { createWorker } from 'tesseract.js'
-import { GoogleGenAI } from "@google/genai"
-import { buildPrompt, buildRetryPrompt } from '../utils/promptEngineer.js'
+import { GoogleGenerativeAI } from '@google/generative-ai'
+import { buildPrompt, buildRetryPrompt, buildOutlinePrompt } from '../utils/promptEngineer.js'
 import { validateResponse } from '../utils/responseValidator.js'
+import session from 'express-session';
 
+const genAI        = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY) // onstructor
+const flashModel   = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' }) // helper
+const proseModel   = genAI.getGenerativeModel({ model: 'gemini-pro' })       // for outlines
 // Set up global fetch and Headers
 global.fetch = fetch
 global.Headers = Headers
 
-dotenv.config()
 
 // …
 
@@ -22,16 +26,6 @@ const upload = multer()
 // const openai = new OpenAI({
 //   apiKey: process.env.OPENAI_API_KEY
 // })
-
-// Import Google Gemini client:
-import pkg from '@google-ai/generativelanguage';
-const { v1beta3 } = pkg;
-const { TextServiceClient } = v1beta3;
-// If you're using API-key instead of service account, pass it in options:
-const gemini = new TextServiceClient({ apiKey: process.env.GOOGLE_API_KEY, fallback: true });
-
-// **New**: instantiate the GenAI SDK
-const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
 
 app.use(express.json())
 
@@ -68,11 +62,114 @@ async function parseUploadedFile(file) {
   }
 }
 
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'socratictasecret',
+  resave: false,
+  saveUninitialized: true,
+}));
+
 app.post('/api/chat', upload.single('file'), async (req, res) => {
   try {
     const { prompt, conversation, problemStatement } = req.body
     const fileContent = await parseUploadedFile(req.file)
-    
+    const userInput = (prompt || '').trim()
+
+    //initial outline request
+    if (!req.session.parts 
+        && userInput.toLowerCase().includes('socratic') && userInput.toLowerCase().includes('outline')) {
+      // Build the special one-shot outline prompt
+      const outlinePrompt = buildOutlinePrompt(userInput, fileContent)
+      const outlineResp   = await proseModel.generateContent(outlinePrompt)
+      const outlineText = outlineResp.response.text().trim()
+
+      // Split on any line of three or more dashes/equals
+      const parts = outlineText
+        .split(/^[-=]{3,}$/m)
+        .map(p => p.trim())
+        .filter(Boolean)
+
+      // Store outline parts in session
+      req.session.parts     = parts
+      req.session.partIndex = 1
+      req.session.currentPart = parts[0]
+      req.session.currentIndex = 0
+
+        const content = parts[0]
+        const more = parts.length > 1
+      // Return full outline and ask to step through
+      console.log('→ entering outline mode', parts)
+      return res.json({
+        reply: 
+          `### Part 1 / ${parts.length}\n\n` +
+          `${content}\n\n` +
+          `Move on to the next part? (yes/no)`
+      })
+    }
+
+    //navigation through outline parts
+    if (req.session.parts) {
+      const answer = userInput.toLowerCase()
+      const yesTriggers = ['yes', 'next', 'move into', 'next part']
+      const wantsNext = yesTriggers.some(t => answer.includes(t))
+      if (wantsNext) {
+        const idx = req.session.partIndex
+        if (idx < req.session.parts.length) {
+          const content = req.session.parts[idx]
+          req.session.currentPart = content
+          req.session.currentIndex = idx
+          req.session.partIndex++
+          const more = req.session.partIndex < req.session.parts.length
+          const qPrompt = `
+You are a Socratic tutor. Based only on the text below, ask clear, guiding question that
+helps a student understand it better, without giving away the answer.
+
+--- BEGIN PART ---
+${content}
+--- END PART ---
+`
+          const qResp = await flashModel.generateContent(qPrompt)
+          const question = qResp.response.text().trim()
+          return res.json({
+            reply: 
+              `### Part ${idx + 1} / ${req.session.parts.length}\n\n` +
+              `${content}\n\n` +
+              `**Tutor:** ${question}` +
+              (more
+                ? '\n\nMove on to the next part? (yes/no)'
+                : '\n\nYou’ve completed all parts.')
+          })
+        }
+      }
+      //repond with no intention go on next part
+      if (req.session.currentPart) {
+        const idx        = req.session.currentIndex ?? 0
+        const content    = req.session.currentPart
+        const more       = req.session.partIndex < req.session.parts.length
+
+        const repeatPrompt = `
+You are still discussing the part below. Respond with guiding question that
+helps the student think deeper, without revealing the answer.
+
+--- BEGIN PART ---
+${content}
+--- END PART ---
+`
+        const qResp   = await flashModel.generateContent(repeatPrompt)
+        const question = qResp.response.text().trim()
+
+        return res.json({
+          reply:
+            `### Part ${idx + 1} / ${req.session.parts.length}\n\n` +
+            `${content}\n\n` +
+            `**Tutor:** ${question}` +
+            (more
+              ? '\n\nMove on to the next part? (yes/no)'
+              : '\n\nYou’ve completed all parts.')
+        })
+      }
+
+    }
+
     // Parse conversation history if it exists
     let conversationHistory = []
     try {
@@ -86,25 +183,45 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
       .map(msg => `${msg.type === 'user' ? 'Student' : 'Tutor'}: ${msg.content}`)
       .join('\n')
 
-    const combinedPrompt = buildPrompt(prompt || '', fileContent, conversationContext, problemStatement)
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: combinedPrompt,
-    })
-    
-    const reply = response.text
-    const validation = validateResponse(reply)
+    //const combinedPrompt = buildPrompt(prompt || '', fileContent, conversationContext)
+    // If we’re inside a part-by-part walk-through, give the model that part, too
+    const combinedPrompt = buildPrompt(
+      prompt || '',
+      fileContent,
+      conversationContext +
+        (req.session.currentPart
+          ? `\n\nCurrent outline part:\n${req.session.currentPart}`
+          : '')
+    )
+
+
+    const response = await flashModel.generateContent(combinedPrompt)
+    const question = response.response.text().trim()
+    const allowOutline = !!(req.session.parts && req.session.partIndex === 0)
+    const validation = validateResponse(question, { allowOutline })
     
     if (!validation.isValid) {
       const retryPrompt = buildRetryPrompt(combinedPrompt)
-      const retryResponse = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: retryPrompt,
-      })
-      res.json({ reply: retryResponse.text })
+      const retryResp = await flashModel.generateContent(retryPrompt)
+      return res.json({ reply: retryResp.response.text().trim() })
     } else {
-      res.json({ reply })
+      if (req.session.currentPart) {
+        const partNum   = (req.session.currentIndex ?? 0) + 1
+        const total     = req.session.parts.length
+        const moreParts = req.session.partIndex < total
+
+        return res.json({
+          reply:
+            `### Part ${partNum} / ${total}\n\n` +
+            `${req.session.currentPart}\n\n` +
+            `**Tutor:** ${question}` +
+            (moreParts ? '\n\nMove on to the next part?' : '\n\nYou’ve completed all parts.')
+        })
+      }
+
+      // normal chat outside outline-mode
+      res.json({ reply: question })
     }
   } catch (err) {
     console.error(err)
@@ -112,8 +229,15 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
   }
 })
 
+app.post('/api/outline/reset', (req, res) => {
+  req.session.parts = null;
+  req.session.partIndex = 0;
+  res.json({ success: true });
+});
+
 // Testing endpoint: Parse file and return parsed text (no OpenAI)
 app.post('/api/parse', upload.single('file'), async (req, res) => {
+  const userInput = (prompt || '').trim()
   try {
     const parsedText = await parseUploadedFile(req.file)
     res.json({ parsedText })
@@ -124,6 +248,26 @@ app.post('/api/parse', upload.single('file'), async (req, res) => {
 })
 
 const PORT = process.env.PORT || 3000
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`)
-})
+const server = app.listen(PORT, () =>
+  console.log(`🚀  Server running on http://localhost:${PORT}`)
+)
+
+function gracefulShutdown(signal) {
+  return () =>
+    server.close(err => {
+      if (err) {
+        console.error('Error during shutdown', err)
+        process.exitCode = 1
+      }
+      // If nodemon triggered the signal, tell it we're done
+      if (signal === 'SIGUSR2') {
+        process.kill(process.pid, 'SIGUSR2')
+      } else {
+        process.exit()
+      }
+    })
+}
+
+process.once('SIGINT',  gracefulShutdown('SIGINT'))   // ^C
+process.once('SIGTERM', gracefulShutdown('SIGTERM'))  // Docker/Heroku
+process.once('SIGUSR2', gracefulShutdown('SIGUSR2'))  // nodemon restart
