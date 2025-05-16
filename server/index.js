@@ -120,8 +120,9 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
           req.session.partIndex++
           const more = req.session.partIndex < req.session.parts.length
           const qPrompt = `
-You are a Socratic tutor. Based only on the text below, ask clear, guiding question that
-helps a student understand it better, without giving away the answer.
+You are a Socratic tutor. Based only on the conversation, ask a clear, guiding question that
+helps a student understand it better, without giving away the answer. Give the student feedback
+on their answers before asking the next question.
 
 --- BEGIN PART ---
 ${content}
@@ -246,6 +247,47 @@ app.post('/api/parse', upload.single('file'), async (req, res) => {
     res.status(500).json({ error: err.message })
   }
 })
+
+app.post('/api/hint', async (req, res) => {
+  const { prompt = '', conversation, problemStatement = '' } = req.body;
+
+  // 1) normalize conversationHistory
+  let conversationHistory = [];
+  if (Array.isArray(conversation)) {
+    conversationHistory = conversation;
+  } else if (typeof conversation === 'string') {
+    try {
+      conversationHistory = JSON.parse(conversation);
+    } catch {
+      conversationHistory = [];
+    }
+  }
+
+  // 2) build context
+  const conversationContext = conversationHistory
+    .map(msg => `${msg.type === 'user' ? 'Student' : 'Tutor'}: ${msg.content}`)
+    .join('\n');
+
+  const extra = `
+Don't start with Hint:. The student is asking for a hint, probably about your previous question. Provide a concise, clear hint that points them toward the solution without giving it away. Should not be a question. Provide facts and notes and examples. And make sure these are all connected to help the student with what they are confused on.
+`;
+
+  const combinedPrompt = buildPrompt(
+    prompt.trim(),
+    /* fileContent */ '',               // whoever parses req.file
+    `${conversationContext}\n\nProblem: ${problemStatement}${extra}`
+  );
+
+  // 3) call your model
+  const response = await flashModel.generateContent(combinedPrompt);
+  // NOTE: adjust this to whatever your model returns!
+  const hint = response.choices?.[0]?.text?.trim() ??  
+               response.response?.text?.().trim() ??
+               'Sorry, no hint right now.';
+
+  res.json({ hint });
+});
+
 
 const PORT = process.env.PORT || 3000
 const server = app.listen(PORT, () =>
