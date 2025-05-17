@@ -12,8 +12,8 @@ import { validateResponse } from '../utils/responseValidator.js'
 import session from 'express-session';
 
 const genAI        = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY) // onstructor
-const flashModel   = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' }) // helper
-const proseModel   = genAI.getGenerativeModel({ model: 'gemini-pro' })       // for outlines
+const flashModel   = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' }) // helper
+const proseModel   = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })       // for outlines
 // Set up global fetch and Headers
 global.fetch = fetch
 global.Headers = Headers
@@ -75,10 +75,10 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
     const userInput = (prompt || '').trim()
 
     //initial outline request
-    if (!req.session.parts 
-        && userInput.toLowerCase().includes('socratic') && userInput.toLowerCase().includes('outline')) {
+    if (!req.session.parts ) {
       // Build the special one-shot outline prompt
-      const outlinePrompt = buildOutlinePrompt(userInput, fileContent)
+      const seed         = problemStatement || userInput
+      const outlinePrompt = buildOutlinePrompt(seed, fileContent)
       const outlineResp   = await proseModel.generateContent(outlinePrompt)
       const outlineText = outlineResp.response.text().trim()
 

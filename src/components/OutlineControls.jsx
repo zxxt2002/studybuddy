@@ -1,11 +1,17 @@
-// src/components/OutlineControls.jsx
 import React from 'react';
+import './OutlineControls.css';
 
-export default function OutlineControls({ onChoose }) {
+export default function OutlineControls({ part, total, content }) {
   return (
-    <div className="d-flex gap-2">
-      <button className="btn btn-success" onClick={() => onChoose('yes')}>Yes</button>
-      <button className="btn btn-danger"  onClick={() => onChoose('no')}>No</button>
+    <div className="outline-controls">
+      <div className="outline-header">
+        Part {part} of {total}
+      </div>
+      <div className="outline-content">
+        {content.split('\n').map((line, i) => (
+          <p key={i}>{line}</p>
+        ))}
+      </div>
     </div>
   );
 }
