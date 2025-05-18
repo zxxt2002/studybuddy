@@ -2,6 +2,7 @@
 import 'bootstrap/dist/css/bootstrap.min.css';
 import React, { useState, useEffect } from 'react';
 import HintPopup from '../components/HintPopup';
+import SummaryPopup from '../components/SummaryPopup';
 
 export default function Chat() {
     const [prompt, setPrompt] = useState('');
@@ -19,6 +20,10 @@ export default function Chat() {
     const [showHint, setShowHint] = useState(false);
     const [hintText, setHintText] = useState('');
     const [loadingHint, setLoadingHint] = useState(false);
+
+    const [showSummary, setShowSummary] = useState(false);
+    const [summaryText, setSummaryText] = useState('');
+    const [loadingSummary, setLoadingSummary] = useState(false);
 
 
     // Save conversation and problem statement to localStorage whenever they change
@@ -99,6 +104,26 @@ export default function Chat() {
             setLoadingHint(false);
         }
     };
+
+    const handleSummary = async () => {
+        setShowSummary(true);
+        setLoadingSummary(true);
+
+        try {
+            const res = await fetch('/api/summary', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ conversation, problemStatement })
+            });
+            const data = await res.json();
+            setSummaryText(data.summary || 'No summary available');
+        } catch (err) {
+            console.error(err);
+            setSummaryText('Error loading summary');
+        } finally {
+            setLoadingSummary(false);
+        }
+    }
 
 
     return (
@@ -220,6 +245,15 @@ export default function Chat() {
                         {showHint ? "Hide hint" : "Need a hint?"}
                     </button>
                 </div>
+                {/* summary button */}
+                <div className="col-auto">
+                    <button
+                        className="btn btn-secondary"
+                        onClick={handleSummary}
+                    >
+                        {showSummary ? "Hide summary" : "Get summary"}
+                    </button>
+                    </div>
             </div>
 
             <HintPopup
@@ -229,6 +263,12 @@ export default function Chat() {
                 loading={loadingHint}
             />
 
+            <SummaryPopup
+                show={showSummary}
+                onClose={() => setShowSummary(false)}
+                summary={summaryText}
+                loading={loadingSummary}
+            />
         </div>
     );
 }

@@ -288,6 +288,46 @@ Don't start with Hint:. The student is asking for a hint, probably about your pr
   res.json({ hint });
 });
 
+app.post('/api/summary', async (req, res) => {
+  const { prompt = '', conversation, problemStatement = '' } = req.body;
+
+  // 1) normalize conversationHistory
+  let conversationHistory = [];
+  if (Array.isArray(conversation)) {
+    conversationHistory = conversation;
+  } else if (typeof conversation === 'string') {
+    try {
+      conversationHistory = JSON.parse(conversation);
+    } catch {
+      conversationHistory = [];
+    }
+  }
+
+  // 2) build context
+  const conversationContext = conversationHistory
+    .map(msg => `${msg.type === 'user' ? 'Student' : 'Tutor'}: ${msg.content}`)
+    .join('\n');
+
+  const extra = `
+Summarize the conversation so far. If you think that the conversation is not yet sufficient to give an answer, you can tell the student that. Make sure to tell the student what they seem to know and what they could work more on.
+`;
+  const combinedPrompt = buildPrompt(
+    prompt.trim(),
+    /* fileContent */ '',               // whoever parses req.file
+    `${conversationContext}\n\nProblem: ${problemStatement}${extra}`
+  );
+
+  // 3) call your model
+  const response = await flashModel.generateContent(combinedPrompt);
+  // NOTE: adjust this to whatever your model returns!
+  const summary = response.choices?.[0]?.text?.trim() ??  
+                  response.response?.text?.().trim() ??
+                  'Sorry, no summary right now.';
+
+  res.json({ summary });
+}
+);
+
 
 const PORT = process.env.PORT || 3000
 const server = app.listen(PORT, () =>
