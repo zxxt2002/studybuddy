@@ -1,0 +1,16 @@
+.outline-controls {
+  border: 1px solid #ddd;
+  padding: 1rem;
+  margin: 1rem 0;
+  border-radius: 6px;
+  background: #fafafa;
+}
+
+.outline-header {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.outline-content p {
+  margin: 0.25rem 0;
+}
