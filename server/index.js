@@ -137,7 +137,7 @@ ${content}
               `**Tutor:** ${question}` +
               (more
                 ? '\n\nMove on to the next part? (yes/no)'
-                : '\n\nYou’ve completed all parts.')
+                : '\n\nYou have completed all parts.')
           })
         }
       }
@@ -165,7 +165,7 @@ ${content}
             `**Tutor:** ${question}` +
             (more
               ? '\n\nMove on to the next part? (yes/no)'
-              : '\n\nYou’ve completed all parts.')
+              : '\n\nYou have completed all parts.')
         })
       }
 
@@ -186,7 +186,7 @@ ${content}
 
 
     //const combinedPrompt = buildPrompt(prompt || '', fileContent, conversationContext)
-    // If we’re inside a part-by-part walk-through, give the model that part, too
+    // If we're inside a part-by-part walk-through, give the model that part, too
     const combinedPrompt = buildPrompt(
       prompt || '',
       fileContent,
@@ -217,7 +217,7 @@ ${content}
             `### Part ${partNum} / ${total}\n\n` +
             `${req.session.currentPart}\n\n` +
             `**Tutor:** ${question}` +
-            (moreParts ? '\n\nMove on to the next part?' : '\n\nYou’ve completed all parts.')
+            (moreParts ? '\n\nMove on to the next part?' : '\n\nYou have completed all parts.')
         })
       }
 
@@ -328,6 +328,37 @@ Summarize the conversation so far. If you think that the conversation is not yet
 }
 );
 
+app.post('/api/chat/regenerate', async (req, res) => {
+  try {
+    const { prompt, conversation, problemStatement, complexity } = req.body;
+    
+    // Build conversation context
+    const conversationContext = conversation
+      .map(msg => `${msg.type === 'user' ? 'Student' : 'Tutor'}: ${msg.content}`)
+      .join('\n');
+
+    // Add complexity instruction to the prompt
+    const complexityInstruction = {
+      'simpler': 'Please provide a simpler explanation with basic concepts and examples.',
+      'more_complex': 'Please provide a more detailed explanation with advanced concepts and deeper analysis.',
+      'different': 'Please explain this concept in a different way, using alternative examples or analogies.'
+    }[complexity] || '';
+
+    const combinedPrompt = buildPrompt(
+      prompt || '',
+      '', // No file content for regeneration
+      `${conversationContext}\n\nProblem: ${problemStatement}\n\n${complexityInstruction}`
+    );
+
+    const response = await flashModel.generateContent(combinedPrompt);
+    const question = response.response.text().trim();
+    
+    res.json({ reply: question });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 const PORT = process.env.PORT || 3000
 const server = app.listen(PORT, () =>
