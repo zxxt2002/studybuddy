@@ -232,6 +232,73 @@ ${content}
   }
 })
 
+app.post('/api/context', upload.single('file'), async (req, res) => {
+  try {
+    // 1. Extract form fields
+    const {
+      description = '',
+      priorKnowledge = '',
+      courseInfo = '',
+      notes = ''
+    } = req.body;
+
+    // 2. Parse the uploaded file, if any
+    const fileText = await parseUploadedFile(req.file);
+
+    // 3. Build a little “extra context” blob
+    const extraContext = [
+      priorKnowledge && `Prior knowledge: ${priorKnowledge}`,
+      courseInfo     && `Course / context: ${courseInfo}`,
+      notes          && `Additional notes: ${notes}`,
+      fileText       && `\n---\n${fileText}`
+    ].filter(Boolean).join('\n');
+
+    // 4. Seed / reset session state
+    req.session.context = { description, priorKnowledge, courseInfo, notes, fileText };
+    // clear any outline‐mode state
+    req.session.parts = null;
+    req.session.partIndex = 0;
+    req.session.currentPart = null;
+
+    // 5. Build the initial LLM prompt
+    const initialPrompt = buildPrompt(
+      description,
+      fileText,
+      extraContext
+    );
+
+    // 6. Fire off the tutor model for your first message
+    const aiResp = await flashModel.generateContent(initialPrompt);
+    const firstTutorMessage = aiResp.response
+      ? aiResp.response.text().trim()
+      : aiResp.choices?.[0]?.text?.trim() ??
+        'Hello! What would you like to explore today?';
+
+    // 7. Initialize session conversation history
+    req.session.conversation = [
+      { type: 'tutor', content: firstTutorMessage }
+    ];
+
+    // 8. Return both conversation and problemStatement to the client
+    res.json({
+      conversation: req.session.conversation,
+      problemStatement: description
+    });
+
+  } catch (err) {
+    console.error('[/api/context] error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/conversation', (req, res) => {
+  res.json({
+    conversation: req.session.conversation || [],
+    problemStatement: req.session.context?.description || ''
+  });
+});
+
+
 app.post('/api/outline/reset', (req, res) => {
   req.session.parts = null;
   req.session.partIndex = 0;
@@ -285,10 +352,50 @@ Don't start with Hint:. The student is asking for a hint, probably about your pr
   // NOTE: adjust this to whatever your model returns!
   const hint = response.choices?.[0]?.text?.trim() ??  
                response.response?.text?.().trim() ??
-               'Sorry, no hint right now.';
+               'Sorry, no hint available right now.';
 
   res.json({ hint });
 });
+
+app.post('/api/summary', async (req, res) => {
+  const { prompt = '', conversation, problemStatement = '' } = req.body;
+
+  // 1) normalize conversationHistory
+  let conversationHistory = [];
+  if (Array.isArray(conversation)) {
+    conversationHistory = conversation;
+  } else if (typeof conversation === 'string') {
+    try {
+      conversationHistory = JSON.parse(conversation);
+    } catch {
+      conversationHistory = [];
+    }
+  }
+
+  // 2) build context
+  const conversationContext = conversationHistory
+    .map(msg => `${msg.type === 'user' ? 'Student' : 'Tutor'}: ${msg.content}`)
+    .join('\n');
+
+  const extra = `
+Summarize the conversation so far. If you think that the conversation is not yet sufficient to give an answer, you can tell the student that. Make sure to tell the student what they seem to know and what they could work more on.
+`;
+  const combinedPrompt = buildPrompt(
+    prompt.trim(),
+    /* fileContent */ '',               // whoever parses req.file
+    `${conversationContext}\n\nProblem: ${problemStatement}${extra}`
+  );
+
+  // 3) call your model
+  const response = await flashModel.generateContent(combinedPrompt);
+  // NOTE: adjust this to whatever your model returns!
+  const summary = response.choices?.[0]?.text?.trim() ??  
+                  response.response?.text?.().trim() ??
+                  'Sorry, no summary right now.';
+
+  res.json({ summary });
+}
+);
 
 
 const PORT = process.env.PORT || 3000

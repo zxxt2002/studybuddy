@@ -1,96 +1,88 @@
 // src/App.jsx
 import 'bootstrap/dist/css/bootstrap.min.css';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import HintPopup from '../components/HintPopup';
+import SummaryPopup from '../components/SummaryPopup';
 import OutlineControls from '../components/OutlineControls';       
 import { parseOutline } from '../utils/outlineUtils.js';
 
 export default function Chat() {
     const [prompt, setPrompt] = useState('');
     const [file, setFile] = useState(null);
-    const [problemStatement, setProblemStatement] = useState(() => {
-        // Load problem statement from localStorage on initial render
-        return localStorage.getItem('problemStatement') || '';
-    });
-    const [conversation, setConversation] = useState(() => {
-        // Load conversation from localStorage on initial render
-        const savedConversation = localStorage.getItem('conversation');
-        return savedConversation ? JSON.parse(savedConversation) : [];
-    });
+    const [problemStatement, setProblemStatement] = useState('');
+    const [conversation, setConversation] = useState([]);
 
     const [showHint, setShowHint] = useState(false);
     const [hintText, setHintText] = useState('');
     const [loadingHint, setLoadingHint] = useState(false);
 
+    const [showSummary, setShowSummary] = useState(false);
+    const [summaryText, setSummaryText] = useState('');
+    const [loadingSummary, setLoadingSummary] = useState(false);
 
-    // Save conversation and problem statement to localStorage whenever they change
+
+    // Fetch initial seeded conversation (includes first tutor message)
     useEffect(() => {
-        localStorage.setItem('conversation', JSON.stringify(conversation));
-        localStorage.setItem('problemStatement', problemStatement);
-    }, [conversation, problemStatement]);
+        fetch('/api/conversation')
+          .then(res => res.json())
+          .then(data => {
+            setConversation(data.conversation || []);
+            setProblemStatement(data.problemStatement || '');
+          })
+          .catch(console.error);
+      }, []);
+      
 
     const handleClearConversation = () => {
+        // Optionally reset server conversation/session here
         setConversation([]);
         setProblemStatement('');
-        localStorage.removeItem('conversation');
-        localStorage.removeItem('problemStatement');
     };
 
     const handleSend = async () => {
         if (!prompt.trim()) return;
 
-        // Add user message to conversation
+        // Add user message locally
         const userMessage = {
             type: 'user',
             content: prompt,
             timestamp: new Date().toLocaleTimeString()
         };
-
         setConversation(prev => [...prev, userMessage]);
-        setPrompt(''); // Clear input after sending
 
         const form = new FormData();
         form.append('prompt', prompt);
         if (file) form.append('file', file);
-        // Add conversation history and problem statement to the request
-        form.append('conversation', JSON.stringify(conversation));
-        form.append('problemStatement', problemStatement);
 
+        // Only send new prompt; session holds past context
         try {
-            const res = await fetch('/api/chat', {
-                method: 'POST',
-                body: form,
-            });
+            const res = await fetch('/api/chat', { method: 'POST', body: form });
             const data = await res.json();
-
-            // Add assistant response to conversation
             const assistantMessage = {
                 type: 'assistant',
                 content: data.error ? `Error: ${data.error}` : data.reply,
                 timestamp: new Date().toLocaleTimeString()
             };
-
             setConversation(prev => [...prev, assistantMessage]);
         } catch (err) {
-            // Add error message to conversation
             const errorMessage = {
                 type: 'assistant',
                 content: `Error: ${err.message}`,
                 timestamp: new Date().toLocaleTimeString()
             };
-
             setConversation(prev => [...prev, errorMessage]);
         }
+        setPrompt('');
     };
+
     const handleHint = async () => {
         setShowHint(true);
         setLoadingHint(true);
-
         try {
             const res = await fetch('/api/hint', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ conversation, problemStatement })
+                body: JSON.stringify({ problemStatement })
             });
             const data = await res.json();
             setHintText(data.hint || 'No hint available');
@@ -102,6 +94,24 @@ export default function Chat() {
         }
     };
 
+    const handleSummary = async () => {
+        setShowSummary(true);
+        setLoadingSummary(true);
+        try {
+            const res = await fetch('/api/summary', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ problemStatement })
+            });
+            const data = await res.json();
+            setSummaryText(data.summary || 'No summary available');
+        } catch (err) {
+            console.error(err);
+            setSummaryText('Error loading summary');
+        } finally {
+            setLoadingSummary(false);
+        }
+    }
 
     return (
         <div className="container py-4">
@@ -110,7 +120,7 @@ export default function Chat() {
                 <button
                     className="btn btn-outline-danger"
                     onClick={handleClearConversation}
-                    disabled={conversation.length === 0 && !problemStatement}
+                    disabled={!conversation.length}
                 >
                     Clear Conversation
                 </button>
@@ -118,9 +128,7 @@ export default function Chat() {
 
             {/* Problem Statement Section */}
             <div className="mb-4">
-                <label htmlFor="problemStatement" className="form-label">
-                    Problem Statement
-                </label>
+                <label htmlFor="problemStatement" className="form-label">Problem Statement</label>
                 <textarea
                     id="problemStatement"
                     className="form-control"
@@ -130,14 +138,8 @@ export default function Chat() {
                     onChange={e => setProblemStatement(e.target.value)}
                     disabled={conversation.length > 0}
                 />
-                {conversation.length > 0 && !problemStatement && (
-                    <small className="text-danger">
-                        Please set a problem statement before starting the conversation
-                    </small>
-                )}
             </div>
 
-            {/* Display current problem statement if set */}
             {problemStatement && (
                 <div className="alert alert-info mb-4">
                     <strong>Current Problem:</strong> {problemStatement}
@@ -208,9 +210,7 @@ export default function Chat() {
 
             {/* Question textarea */}
             <div className="mb-4">
-                <label htmlFor="prompt" className="form-label">
-                    Your Question
-                </label>
+                <label htmlFor="prompt" className="form-label">Your Question</label>
                 <textarea
                     id="prompt"
                     className="form-control"
@@ -218,60 +218,29 @@ export default function Chat() {
                     placeholder="Enter your question here…"
                     value={prompt}
                     onChange={e => setPrompt(e.target.value)}
-                    onKeyPress={e => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            handleSend();
-                        }
-                    }}
+                    onKeyPress={e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                 />
             </div>
 
-            {/* File input and Send button on same line */}
+            {/* File input & controls */}
             <div className="row align-items-end mb-5 gx-2">
-                {/* file input in a shrink-to-content column */}
                 <div className="col-auto">
-                    <label htmlFor="fileInput" className="form-label">
-                        Attach (optional)
-                    </label>
-                    <input
-                        type="file"
-                        id="fileInput"
-                        className="form-control form-control-md w-auto"
-                        style={{ maxWidth: '240px' }}
-                        onChange={e => setFile(e.target.files[0] || null)}
-                    />
+                    <label htmlFor="fileInput" className="form-label">Attach (optional)</label>
+                    <input type="file" id="fileInput" className="form-control w-auto" style={{maxWidth:'240px'}} onChange={e=>setFile(e.target.files[0]||null)} />
                 </div>
-
-                {/* send button */}
                 <div className="col-auto">
-                    <button
-                        className="btn btn-primary"
-                        onClick={handleSend}
-                        disabled={!prompt.trim()}
-                    >
-                        Send
-                    </button>
+                    <button className="btn btn-primary" onClick={handleSend} disabled={!prompt.trim()}>Send</button>
                 </div>
-
-                {/* hint button */}
                 <div className="col-auto">
-                    <button
-                        className="btn btn-secondary"
-                        onClick={handleHint}
-                    >
-                        {showHint ? "Hide hint" : "Need a hint?"}
-                    </button>
+                    <button className="btn btn-secondary" onClick={handleHint}>{showHint?"Hide hint":"Need a hint?"}</button>
+                </div>
+                <div className="col-auto">
+                    <button className="btn btn-secondary" onClick={handleSummary}>{showSummary?"Hide summary":"Get summary"}</button>
                 </div>
             </div>
 
-            <HintPopup
-                show={showHint}
-                onClose={() => setShowHint(false)}
-                hint={hintText}
-                loading={loadingHint}
-            />
-
+            <HintPopup show={showHint} onClose={()=>setShowHint(false)} hint={hintText} loading={loadingHint} />
+            <SummaryPopup show={showSummary} onClose={()=>setShowSummary(false)} summary={summaryText} loading={loadingSummary} />
         </div>
     );
 }
