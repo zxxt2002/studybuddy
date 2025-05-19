@@ -338,7 +338,7 @@ app.post('/api/hint', async (req, res) => {
     .join('\n');
 
   const extra = `
-Do not start with Hint:. Only give the student guidance related to what you have talked about with them. It's okay not to ask questions now. You should not ask any questions, but a hint. The hint should be a guiding fact/statement that helps the student think deeper about the problem. If you don't have enough information in the conversation, it's okay to say that.`;
+Do not start with Hint:. Only give the hint text. Only give the student guidance related to what you have talked about with them. It's okay not to ask questions now. You should not ask any questions, but a hint. The hint should be a guiding fact/statement that helps the student think deeper about the problem. If you don't have enough information in the conversation, it's okay to say that.`;
 
   const combinedPrompt = buildPrompt(
     prompt.trim(),
