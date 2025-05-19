@@ -22,7 +22,7 @@ export default function ContextPopup({ show, onClose, onSave, initialContext = {
   return (
     <Modal show={show} onHide={onClose} centered>
       <Modal.Header closeButton>
-        <Modal.Title>Additional Context for LLM</Modal.Title>
+        <Modal.Title>Context</Modal.Title>
       </Modal.Header>
 
       <Modal.Body>

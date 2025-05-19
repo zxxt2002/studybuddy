@@ -377,7 +377,7 @@ app.post('/api/summary', async (req, res) => {
     .join('\n');
 
   const extra = `
-Summarize the conversation so far. If you think that the conversation is not yet sufficient to give an answer, you can tell the student that. Make sure to tell the student what they seem to know and what they could work more on.
+Summarize the conversation so far. Make sure to tell the student what they seem to know and what they could work more on. Do not use any questions and give them a useful summary.
 `;
   const combinedPrompt = buildPrompt(
     prompt.trim(),
