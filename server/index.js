@@ -338,13 +338,12 @@ app.post('/api/hint', async (req, res) => {
     .join('\n');
 
   const extra = `
-Don't start with Hint:. The student is asking for a hint, probably about your previous question. Provide a concise, clear hint that points them toward the solution without giving it away. Should not be a question. Provide facts and notes and examples. And make sure these are all connected to help the student with what they are confused on.
-`;
+Do not start with Hint:. Only give the student guidance related to what you have talked about with them. It's okay not to ask questions now. You should not ask any questions, but a hint. The hint should be a guiding fact/statement that helps the student think deeper about the problem. If you don't have enough information in the conversation, it's okay to say that.`;
 
   const combinedPrompt = buildPrompt(
     prompt.trim(),
     /* fileContent */ '',               // whoever parses req.file
-    `${conversationContext}\n\nProblem: ${problemStatement}${extra}`
+    `${extra}\n\nContext: ${conversationContext}\n\nProblem: ${problemStatement}. Do not ask any questions.`
   );
 
   // 3) call your model
