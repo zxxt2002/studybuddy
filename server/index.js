@@ -77,14 +77,18 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
     //initial outline request
     if (!req.session.parts ) {
       // Build the special one-shot outline prompt
-      const seed         = problemStatement || userInput
-      const outlinePrompt = buildOutlinePrompt(seed, fileContent)
+      const outlinePrompt = buildOutlinePrompt(
+        userInput,          // student's current question (may be empty)
+        fileContent,        // any uploaded/parsed file
+        /* conversationContext */ '',
+        problemStatement    // main problem/topic (may be empty)
+      )
       const outlineResp   = await proseModel.generateContent(outlinePrompt)
       const outlineText = outlineResp.response.text().trim()
 
       // Split on any line of three or more dashes/equals
       const parts = outlineText
-        .split(/^[-=]{3,}$/m)
+        .split(/(?:^|\n)(?=\s*(?:\*\*|__|#+)?\s*part\s+\d+\b)|^[-=]{3,}$/gim)
         .map(p => p.trim())
         .filter(Boolean)
 
@@ -161,7 +165,6 @@ ${content}
         return res.json({
           reply:
             `### Part ${idx + 1} / ${req.session.parts.length}\n\n` +
-            `${content}\n\n` +
             `**Tutor:** ${question}` +
             (more
               ? '\n\nMove on to the next part? (yes/no)'
@@ -215,7 +218,6 @@ ${content}
         return res.json({
           reply:
             `### Part ${partNum} / ${total}\n\n` +
-            `${req.session.currentPart}\n\n` +
             `**Tutor:** ${question}` +
             (moreParts ? '\n\nMove on to the next part?' : '\n\nYou’ve completed all parts.')
         })

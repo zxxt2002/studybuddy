@@ -1,16 +1,22 @@
 
 export function buildOutlinePrompt(userInput, fileContent = '', conversationContext = '', problemStatement = '') {
   return `
-now i want the answer in socratic style, give me all the needed knowledge and hint in one reply, but separate the answer into parts based on the knowledge type, with a obvious separation line.
-
+[System Instructions]
+You are preparing a study outline **only** (do NOT tutor yet).
+1. Use Markdown headings in the form: **Part <n>: <Short Title>**
+2. Under each heading, give 3-6 concise bullet points of the core knowledge.
+3. Do **not** include any driect answers that related to question, “Me:”, “Hint:”, or dialogue.
+4. Keep wording neutral, objective, and focused on content.
 
 ${problemStatement ? `Main Problem/Topic:\n${problemStatement}\n\n` : ''}
 ${conversationContext ? `Previous Conversation:\n${conversationContext}\n\n` : ''}
 Current Context:
-User's question: "${userInput}"
-${fileContent ? `\nAttached file:\n${fileContent}` : ''}
+${userInput ? `Student's current question:\n${userInput}\n` : ''}
+${fileContent ? `Relevant file content:\n${fileContent}\n` : ''}
 `.trim()
 }
+
+
 
 export function buildRetryPrompt(originalPrompt) {
   return originalPrompt + '\n\nPrevious response was invalid. Please provide a single question that helps the student discover the answer themselves, without giving any direct answers.'
