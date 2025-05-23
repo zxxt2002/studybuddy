@@ -75,104 +75,104 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
     const userInput = (prompt || '').trim()
 
     //initial outline request
-    if (!req.session.parts ) {
-      // Build the special one-shot outline prompt
-      const outlinePrompt = buildOutlinePrompt(
-        userInput,          // student's current question (may be empty)
-        fileContent,        // any uploaded/parsed file
-        /* conversationContext */ '',
-        problemStatement    // main problem/topic (may be empty)
-      )
-      const outlineResp   = await proseModel.generateContent(outlinePrompt)
-      const outlineText = outlineResp.response.text().trim()
+    // if (!req.session.parts ) {
+    //   // Build the special one-shot outline prompt
+    //   const outlinePrompt = buildOutlinePrompt(
+    //     userInput,          // student's current question (may be empty)
+    //     fileContent,        // any uploaded/parsed file
+    //     /* conversationContext */ '',
+    //     problemStatement    // main problem/topic (may be empty)
+    //   )
+    //   const outlineResp   = await proseModel.generateContent(outlinePrompt)
+    //   const outlineText = outlineResp.response.text().trim()
 
-      // Split on any line of three or more dashes/equals
-      const parts = outlineText
-        .split(/(?:^|\n)(?=\s*(?:\*\*|__|#+)?\s*part\s+\d+\b)|^[-=]{3,}$/gim)
-        .map(p => p.trim())
-        .filter(Boolean)
+    //   // Split on any line of three or more dashes/equals
+    //   const parts = outlineText
+    //     .split(/(?:^|\n)(?=\s*(?:\*\*|__|#+)?\s*part\s+\d+\b)|^[-=]{3,}$/gim)
+    //     .map(p => p.trim())
+    //     .filter(Boolean)
 
-      // Store outline parts in session
-      req.session.parts     = parts
-      req.session.partIndex = 1
-      req.session.currentPart = parts[0]
-      req.session.currentIndex = 0
+    //   // Store outline parts in session
+    //   req.session.parts     = parts
+    //   req.session.partIndex = 1
+    //   req.session.currentPart = parts[0]
+    //   req.session.currentIndex = 0
 
-        const content = parts[0]
-        const more = parts.length > 1
-      // Return full outline and ask to step through
-      console.log('→ entering outline mode', parts)
-      return res.json({
-        reply: 
-          `### Part 1 / ${parts.length}\n\n` +
-          `${content}\n\n` +
-          `Move on to the next part? (yes/no)`
-      })
-    }
+    //     const content = parts[0]
+    //     const more = parts.length > 1
+    //   // Return full outline and ask to step through
+    //   console.log('→ entering outline mode', parts)
+    //   return res.json({
+    //     reply: 
+    //       `### Part 1 / ${parts.length}\n\n` +
+    //       `${content}\n\n` +
+    //       `Move on to the next part? (yes/no)`
+    //   })
+    // }
 
     //navigation through outline parts
-    if (req.session.parts) {
-      const answer = userInput.toLowerCase()
-      const yesTriggers = ['yes', 'next', 'move into', 'next part']
-      const wantsNext = yesTriggers.some(t => answer.includes(t))
-      if (wantsNext) {
-        const idx = req.session.partIndex
-        if (idx < req.session.parts.length) {
-          const content = req.session.parts[idx]
-          req.session.currentPart = content
-          req.session.currentIndex = idx
-          req.session.partIndex++
-          const more = req.session.partIndex < req.session.parts.length
-          const qPrompt = `
-You are a Socratic tutor. Based only on the conversation, ask a clear, guiding question that
-helps a student understand it better, without giving away the answer. Give the student feedback
-on their answers before asking the next question.
+//     if (req.session.parts) {
+//       const answer = userInput.toLowerCase()
+//       const yesTriggers = ['yes', 'next', 'move into', 'next part']
+//       const wantsNext = yesTriggers.some(t => answer.includes(t))
+//       if (wantsNext) {
+//         const idx = req.session.partIndex
+//         if (idx < req.session.parts.length) {
+//           const content = req.session.parts[idx]
+//           req.session.currentPart = content
+//           req.session.currentIndex = idx
+//           req.session.partIndex++
+//           const more = req.session.partIndex < req.session.parts.length
+//           const qPrompt = `
+// You are a Socratic tutor. Based only on the conversation, ask a clear, guiding question that
+// helps a student understand it better, without giving away the answer. Give the student feedback
+// on their answers before asking the next question.
 
---- BEGIN PART ---
-${content}
---- END PART ---
-`
-          const qResp = await flashModel.generateContent(qPrompt)
-          const question = qResp.response.text().trim()
-          return res.json({
-            reply: 
-              `### Part ${idx + 1} / ${req.session.parts.length}\n\n` +
-              `${content}\n\n` +
-              `**Tutor:** ${question}` +
-              (more
-                ? '\n\nMove on to the next part? (yes/no)'
-                : '\n\nYou have completed all parts.')
-          })
-        }
-      }
-      //repond with no intention go on next part
-      if (req.session.currentPart) {
-        const idx        = req.session.currentIndex ?? 0
-        const content    = req.session.currentPart
-        const more       = req.session.partIndex < req.session.parts.length
+// --- BEGIN PART ---
+// ${content}
+// --- END PART ---
+// `
+//           const qResp = await flashModel.generateContent(qPrompt)
+//           const question = qResp.response.text().trim()
+//           return res.json({
+//             reply: 
+//               `### Part ${idx + 1} / ${req.session.parts.length}\n\n` +
+//               `${content}\n\n` +
+//               `**Tutor:** ${question}` +
+//               (more
+//                 ? '\n\nMove on to the next part? (yes/no)'
+//                 : '\n\nYou have completed all parts.')
+//           })
+//         }
+//       }
+//       //repond with no intention go on next part
+//       if (req.session.currentPart) {
+//         const idx        = req.session.currentIndex ?? 0
+//         const content    = req.session.currentPart
+//         const more       = req.session.partIndex < req.session.parts.length
 
-        const repeatPrompt = `
-You are still discussing the part below. Respond with guiding question that
-helps the student think deeper, without revealing the answer.
+//         const repeatPrompt = `
+// You are still discussing the part below. Respond with guiding question that
+// helps the student think deeper, without revealing the answer.
 
---- BEGIN PART ---
-${content}
---- END PART ---
-`
-        const qResp   = await flashModel.generateContent(repeatPrompt)
-        const question = qResp.response.text().trim()
+// --- BEGIN PART ---
+// ${content}
+// --- END PART ---
+// `
+//         const qResp   = await flashModel.generateContent(repeatPrompt)
+//         const question = qResp.response.text().trim()
 
-        return res.json({
-          reply:
-            `### Part ${idx + 1} / ${req.session.parts.length}\n\n` +
-            `**Tutor:** ${question}` +
-            (more
-              ? '\n\nMove on to the next part? (yes/no)'
-              : '\n\nYou have completed all parts.')
-        })
-      }
+//         return res.json({
+//           reply:
+//             `### Part ${idx + 1} / ${req.session.parts.length}\n\n` +
+//             `**Tutor:** ${question}` +
+//             (more
+//               ? '\n\nMove on to the next part? (yes/no)'
+//               : '\n\nYou have completed all parts.')
+//         })
+//       }
 
-    }
+//     }
 
     // Parse conversation history if it exists
     let conversationHistory = []

@@ -188,9 +188,9 @@ export default function Chat() {
 
                             return (
                                 <div key={index} className="mb-3">
-                                    {/* nicely formatted outline card */}
+                                    {/* nicely formatted outline card
                                     <OutlineControls part={part} total={total}
-                                                   content={outlineBody.trim()} />
+                                                   content={outlineBody.trim()} /> */}
 
                                     {/* tutor's Socratic question, if present */}
                                     {tutorRaw.trim() && (
