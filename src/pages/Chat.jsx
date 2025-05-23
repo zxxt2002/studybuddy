@@ -83,7 +83,10 @@ export default function Chat() {
             const res = await fetch('/api/hint', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ problemStatement })
+                body: JSON.stringify({ 
+                    conversation,
+                    problemStatement 
+                })
             });
             const data = await res.json();
             setHintText(data.hint || 'No hint available');
@@ -102,7 +105,10 @@ export default function Chat() {
             const res = await fetch('/api/summary', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ problemStatement })
+                body: JSON.stringify({ 
+                    conversation,
+                    problemStatement 
+                })
             });
             const data = await res.json();
             setSummaryText(data.summary || 'No summary available');
@@ -177,70 +183,33 @@ export default function Chat() {
             {/* Conversation history */}
             <div className="conversation-container mb-4"
                  style={{ maxHeight: '500px', overflowY: 'auto' }}>
-                {conversation.map((message, index) => {
-                    // 1) If it's the assistant, check whether it's an "outline" reply:
-                    if (message.type === 'assistant') {
-                        const { part, total, content } = parseOutline(message.content);
-
-                        if (part && total) {
-                            // split the Gemini reply into   ① outline-body   ② tutor question
-                            const [outlineBody, tutorRaw=''] = content.split('**Tutor:**');
-
-                            return (
-                                <div key={index} className="mb-3">
-                                    {/* nicely formatted outline card */}
-                                    <OutlineControls part={part} total={total}
-                                                   content={outlineBody.trim()} />
-
-                                    {/* tutor's Socratic question, if present */}
-                                    {tutorRaw.trim() && (
-                                        <div className="message mb-3 p-3 rounded bg-light">
-                                            <div className="message-content">
-                                                <strong>Tutor:&nbsp;</strong>{tutorRaw.trim()}
-                                            </div>
-                                            <MessageReactions 
-                                                onRegenerate={(complexity) => handleRegenerate(index, complexity)} 
-                                            />
-                                        </div>
-                                    )}
-
-                                    <small className="text-muted d-block mt-1"
-                                           style={{ fontSize:'0.8rem' }}>
-                                        {message.timestamp}
-                                    </small>
-                                </div>
-                            );
-                        }
-                    }
-
-                    /* 2) fallback → render message exactly as before */
-                    return (
-                        <div key={index}
-                             className={`message mb-3 p-3 rounded ${
-                                 message.type === 'user'
-                                     ? 'bg-primary text-white ms-auto'
-                                     : 'bg-light'
-                             }`}
-                             style={{
-                                 maxWidth:'80%',
-                                 marginLeft: message.type === 'user' ? 'auto' : '0',
-                                 marginRight: message.type === 'user' ? '0' : 'auto',
-                             }}>
-                            <div className="message-content" style={{whiteSpace:'pre-line'}}>
-                                {message.content}
-                            </div>
-                            {message.type === 'assistant' && (
-                                <MessageReactions 
-                                    onRegenerate={(complexity) => handleRegenerate(index, complexity)} 
-                                />
-                            )}
-                            <small className="text-muted d-block mt-1"
-                                   style={{ fontSize:'0.8rem' }}>
-                                {message.timestamp}
-                            </small>
+                {conversation.map((message, index) => (
+                    <div key={index}
+                         className={`message mb-3 p-3 rounded ${
+                             message.type === 'user'
+                                 ? 'bg-primary text-white ms-auto'
+                                 : 'bg-light'
+                         }`}
+                         style={{
+                             maxWidth:'80%',
+                             marginLeft: message.type === 'user' ? 'auto' : '0',
+                             marginRight: message.type === 'user' ? '0' : 'auto',
+                         }}>
+                        <div className="message-content" style={{whiteSpace:'pre-line'}}>
+                            {message.content}
                         </div>
-                    );
-                })}
+                        {message.type === 'assistant' && (
+                            <MessageReactions 
+                                onRegenerate={(complexity) => handleRegenerate(index, complexity)} 
+                            />
+                        )}
+                        <small className="text-muted d-block mt-1"
+                               style={{ fontSize:'0.8rem' }}>
+                            {message.timestamp}
+                        </small>
+                    </div>
+                ))}
+
             </div>
 
             {/* Question textarea */}
