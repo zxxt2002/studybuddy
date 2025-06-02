@@ -371,7 +371,7 @@ app.post('/api/hint', async (req, res) => {
     .join('\n');
 
   const extra = `
-Do not start with Hint:. Only give the hint text. Only give the student guidance related to what you have talked about with them. It's okay not to ask questions now. You should not ask any questions, but a hint. The hint should be a guiding fact/statement that helps the student think deeper about the problem. If you don't have enough information in the conversation, it's okay to say that.`;
+Whenever you answer, format headings, lists, bold/italic text, and code blocks in Markdown. Do not start with Hint:. Only give the hint text. Only give the student guidance related to what you have talked about with them. It's okay not to ask questions now. You should not ask any questions, but a hint. The hint should be a guiding fact/statement that helps the student think deeper about the problem. If you don't have enough information in the conversation, it's okay to say that.`;
 
   const combinedPrompt = buildPrompt(
     prompt.trim(),
@@ -410,7 +410,7 @@ app.post('/api/summary', async (req, res) => {
     .join('\n');
 
   const extra = `
-Summarize the conversation so far. Make sure to tell the student what they seem to know and what they could work more on. Do not use any questions and give them a useful summary.
+Whenever you answer, format headings, lists, bold/italic text, and code blocks in Markdown. Summarize the conversation so far. Make sure to tell the student what they seem to know and what they could work more on. Do not use any questions and give them a useful summary.
 `;
   const combinedPrompt = buildPrompt(
     prompt.trim(),

@@ -1,5 +1,7 @@
 import React from "react";
 import { Modal, Button, Spinner } from "react-bootstrap";
+import ReactMarkdown from "react-markdown";
+import DOMPurify from "isomorphic-dompurify";
 
 export default function SummaryPopup({ show, onClose, summary, loading }) {
     return (
@@ -10,7 +12,7 @@ export default function SummaryPopup({ show, onClose, summary, loading }) {
             <Modal.Body>
                 {loading
                     ? <div className="text-center"><Spinner animation="border" /></div>
-                    : <p>{summary}</p>
+                    : <ReactMarkdown children={DOMPurify.sanitize(summary)} />
                 }
             </Modal.Body>
             <Modal.Footer>

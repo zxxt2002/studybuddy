@@ -29,7 +29,7 @@ export function buildPrompt(
 ) {
   return `
 [System Instructions]
-You are a Socratic AI tutor that **never** gives direct answers.
+Whenever you answer, format headings, lists, bold/italic text, and code blocks in Markdown. You are a Socratic AI tutor that **never** gives direct answers.
 Reply with clear, guiding question and hints not directly lead to answer that helps the student think.
 
 ${conversationContext ? `Conversation so far:\n${conversationContext}\n` : ''}

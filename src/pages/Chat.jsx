@@ -6,6 +6,8 @@ import SummaryPopup from '../components/SummaryPopup';
 import OutlineControls from '../components/OutlineControls';       
 import { parseOutline } from '../utils/outlineUtils.js';
 import MessageReactions from '../components/MessageReactions';
+import DOMPurify from 'isomorphic-dompurify';
+import ReactMarkdown from 'react-markdown';
 
 export default function Chat() {
     const [prompt, setPrompt] = useState('');
@@ -150,7 +152,7 @@ export default function Chat() {
     return (
         <div className="container py-4">
             <div className="d-flex justify-content-between align-items-center mb-4">
-                <h1 className="mb-0">STUDY BUDDY</h1>
+                <h1 className="mb-0">SocraticTA</h1>
                 <button
                     className="btn btn-outline-danger"
                     onClick={handleClearConversation}
@@ -196,7 +198,7 @@ export default function Chat() {
                              marginRight: message.type === 'user' ? '0' : 'auto',
                          }}>
                         <div className="message-content" style={{whiteSpace:'pre-line'}}>
-                            {message.content}
+                            <ReactMarkdown children={DOMPurify.sanitize(message.content)} />
                         </div>
                         {message.type === 'assistant' && (
                             <MessageReactions 
