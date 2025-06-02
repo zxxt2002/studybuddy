@@ -22,7 +22,7 @@ export default function Home() {
 
   return (
     <div className="d-flex flex-column justify-content-center align-items-center vh-100 text-center">
-      <img src="StudyBuddy.png" alt="Study Buddy Logo" className="logo" style={{ height: '400px' }}/>
+      <img src="StudyBuddy.png" alt="Study Buddy Logo" className="logo" style={{ height: '200px' }}/>
       <Button size="lg" onClick={() => setShow(true)}>
         Provide Context &amp; Start Chat
       </Button>
