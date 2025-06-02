@@ -22,7 +22,7 @@ export default function Home() {
 
   return (
     <div className="d-flex flex-column justify-content-center align-items-center vh-100 text-center">
-      <h1 className="display-3 mb-5">Welcome to SocraticTA</h1>
+      <img src="StudyBuddy.png" alt="Study Buddy Logo" className="logo" style={{ height: '400px' }}/>
       <Button size="lg" onClick={() => setShow(true)}>
         Provide Context &amp; Start Chat
       </Button>
