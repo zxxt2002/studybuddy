@@ -144,7 +144,7 @@ export default function Chat() {
     return (
         <div className="container py-4">
             <div className="d-flex justify-content-between align-items-center mb-4">
-                <h1 className="mb-0">STUDY BUDDY</h1>
+                <img src="StudyBuddy.png" alt="Study Buddy Logo" className="logo" style={{ height: '100px' }}/>
                 <button
                     className="btn btn-outline-danger"
                     onClick={handleClearConversation}
