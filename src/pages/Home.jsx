@@ -37,7 +37,7 @@ export default function Home() {
       <main className="home-main d-flex flex-column justify-content-center align-items-center text-center px-3">
         {/* Tagline: larger and centered */}
         <h2 className="tagline mb-4">
-          Your AI-powered socratic learning companion.
+          Your AI socratic learning companion.
         </h2>
 
         {/* Primary CTA Button */}
