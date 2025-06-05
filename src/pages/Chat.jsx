@@ -222,6 +222,14 @@ export default function Chat() {
                 if (data.conversation && data.conversation.length > conversation.length) {
                     setConversation(data.conversation);
                 }
+                
+                // Also refresh conversation from server to make sure we're in sync
+                const conversationRes = await fetch('/api/conversation');
+                if (conversationRes.ok) {
+                    const conversationData = await conversationRes.json();
+                    setConversation(conversationData.conversation || []);
+                    setQuestionProgress(conversationData.questionProgress || []);
+                }
             }
         } catch (err) {
             console.error('Error toggling progress:', err);

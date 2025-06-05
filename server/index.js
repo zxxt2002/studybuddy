@@ -391,6 +391,7 @@ app.post('/api/essential-questions/toggle', requireAuth, async (req, res) => {
       const wasCompleted = req.session.questionProgress[questionIndex];
       req.session.questionProgress[questionIndex] = !req.session.questionProgress[questionIndex];
       
+      // If user just marked a question as complete, guide to next question
       if (!wasCompleted && req.session.questionProgress[questionIndex]) {
         const nextIncompleteIndex = req.session.questionProgress.findIndex(
           (completed, index) => !completed && index > questionIndex
@@ -399,14 +400,16 @@ app.post('/api/essential-questions/toggle', requireAuth, async (req, res) => {
         let tutorMessage = '';
         if (nextIncompleteIndex !== -1) {
           const nextQuestion = req.session.essentialQuestions[nextIncompleteIndex];
-          tutorMessage = `Great progress! Let's move on to the next essential concept: ${nextQuestion}`;
+          tutorMessage = `**Great progress!** 🎉\n\nLet's move on to the next essential concept:\n\n**${nextQuestion}**\n\nWhat do you think about this?`;
         } else {
+          // Check if all questions are complete
           const allComplete = req.session.questionProgress.every(completed => completed);
           if (allComplete) {
-            tutorMessage = `Excellent! You've covered all the essential questions for this topic. What would you like to explore further or do you have any remaining questions?`;
+            tutorMessage = `**🎉 Excellent! You've covered all the essential questions for this topic!**\n\nYou've demonstrated understanding of:\n${req.session.essentialQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n')}\n\nWhat would you like to explore further, or do you have any remaining questions about this topic?`;
           }
         }
         
+        // Add tutor message to conversation
         if (tutorMessage) {
           req.session.conversation = req.session.conversation || [];
           req.session.conversation.push({
@@ -414,16 +417,18 @@ app.post('/api/essential-questions/toggle', requireAuth, async (req, res) => {
             content: tutorMessage,
             timestamp: new Date().toLocaleTimeString()
           });
+          
+          console.log(`Added next question message to conversation`);
         }
       }
       
-      console.log(`Manually toggled question ${questionIndex + 1} to ${req.session.questionProgress[questionIndex]}`);
+      console.log(`Toggled question ${questionIndex + 1} to ${req.session.questionProgress[questionIndex]}`);
     }
     
     res.json({ 
       questions: req.session.essentialQuestions || [],
       progress: req.session.questionProgress || [],
-      conversation: (req.session.conversation || []).slice(1)
+      conversation: (req.session.conversation || []).slice(1) // Remove system message
     });
   } catch (err) {
     console.error('Error toggling question progress:', err);
