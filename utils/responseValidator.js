@@ -1,14 +1,7 @@
 const directAnswerIndicators = [
   'the answer is',
-  'here is how',
-  'you should',
-  'you need to',
-  'you must',
+  'the answer to your question is',
   'the solution is',
-  'here\'s what',
-  'here\'s how',
-  'this is how',
-  'this is what'
 ]
 
 export function validateResponse(response, { allowOutline = false } = {}) {

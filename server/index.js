@@ -1,374 +1,238 @@
-import multer from 'multer'
-import dotenv from 'dotenv'
-dotenv.config()
-import express from 'express'
-import fetch, { Headers } from 'node-fetch'
-import pdfjs from 'pdfjs-dist/legacy/build/pdf.js'
-const { getDocument } = pdfjs
-import { createWorker } from 'tesseract.js'
-import { GoogleGenerativeAI } from '@google/generative-ai'
-import { buildPrompt, buildRetryPrompt } from '../utils/promptEngineer.js'
-import { validateResponse } from '../utils/responseValidator.js'
+// server.js – token‑lean SocraticTA backend (questions array fix)
+import multer from 'multer';
+import dotenv from 'dotenv';
+dotenv.config();
+import express from 'express';
+import fetch, { Headers } from 'node-fetch';
+import pdfjs from 'pdfjs-dist/legacy/build/pdf.js';
+const { getDocument } = pdfjs;
+import { createWorker } from 'tesseract.js';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { buildPrompt, buildRetryPrompt, buildContextPrompt } from '../utils/promptEngineer.js';
+import { validateResponse } from '../utils/responseValidator.js';
 import session from 'express-session';
 
-const genAI        = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY) // constructor
-const flashModel   = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' }) // helper
-const proseModel   = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })       // for generation
-// Set up global fetch and Headers
-global.fetch = fetch
-global.Headers = Headers
+// ──────────────────────────────────────
+// 1.  Constants & model setup
+// ──────────────────────────────────────
+const RULES = `You are a Socratic tutor. Use short, question‑driven replies. Never reveal chain‑of‑thought. Use markdown when helpful.`;
 
-// …
+const genAI      = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+const flashModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-const app = express()
-const upload = multer()
+global.fetch   = fetch;
+global.Headers = Headers;
 
-app.use(express.json())
+const app    = express();
+const upload = multer();
+app.use(express.json());
 
-// Helper function to parse uploaded file
-async function parseUploadedFile(file) {
-  if (!file) return ''
-
-  const mimeType = file.mimetype
-
-  if (mimeType === 'application/pdf') {
-    // New parse logic using pdfjs-dist
-    const loadingTask = getDocument({ data: file.buffer });
-    const pdfDocument = await loadingTask.promise;
-
-    let textContent = '';
-
-    for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
-      const page = await pdfDocument.getPage(pageNum);
-      const text = await page.getTextContent();
-      const pageText = text.items.map(item => item.str).join(' ');
-      textContent += pageText + '\n';
-    }
-
-    return textContent.trim();
-  } else if (mimeType.startsWith('image/')) {
-    const worker = await createWorker('eng')
-    const { data: { text } } = await worker.recognize(file.buffer)
-    await worker.terminate()
-    return text.trim()
-  } else if (mimeType.startsWith('text/')) {
-    return file.buffer.toString('utf-8').trim()
-  } else {
-    return '[Unsupported file type uploaded]'
+// ──────────────────────────────────────
+// 2.  Utility helpers
+// ──────────────────────────────────────
+const normalizeConversation = raw => {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw); } catch { /* ignore */ }
   }
+  return [];
+};
+
+const compressHistory = (history, maxTurns = 2) => {
+  if (!history?.length) return '';
+  const sys  = history[0]?.type === 'system' ? [history[0]] : [];
+  const tail = history.slice(-maxTurns * 2);
+  return [...sys, ...tail]
+    .map(m => `${m.type === 'user' ? 'S:' : m.type === 'tutor' ? 'T:' : 'SYS:'}${m.content}`)
+    .join('\n');
+};
+
+async function parseUploadedFile(file) {
+  if (!file) return '';
+  const { mimetype } = file;
+  if (mimetype === 'application/pdf') {
+    const pdfDoc = await getDocument({ data: file.buffer }).promise;
+    let out = '';
+    for (let p = 1; p <= Math.min(pdfDoc.numPages, 5); p++) { // Limit to 5 pages
+      const page = await pdfDoc.getPage(p);
+      const txt  = await page.getTextContent();
+      out += txt.items.map(i => i.str).join(' ') + '\n';
+    }
+    return out.trim().substring(0, 3000); // Limit to 3000 chars
+  }
+  if (mimetype.startsWith('image/')) {
+    const worker = await createWorker('eng');
+    const { data: { text } } = await worker.recognize(file.buffer);
+    await worker.terminate();
+    return text.trim().substring(0, 1500); // Limit OCR text
+  }
+  if (mimetype.startsWith('text/')) {
+    return file.buffer.toString('utf-8').trim().substring(0, 2000); // Limit text files
+  }
+  return '[Unsupported file type]';
 }
 
+// ──────────────────────────────────────
+// 3.  Session & middleware
+// ──────────────────────────────────────
 app.use(session({
   secret: process.env.SESSION_SECRET || 'socratictasecret',
   resave: false,
-  saveUninitialized: true,
+  saveUninitialized: true
 }));
 
-app.post('/api/chat', upload.single('file'), async (req, res) => {
-  try {
-    const { prompt, conversation, problemStatement } = req.body
-    const fileContent = await parseUploadedFile(req.file)
-    const userInput = (prompt || '').trim()
+app.use((req, _res, next) => {
+  if (!req.session.system) req.session.system = RULES;
+  next();
+});
 
-    // Parse conversation history if it exists
-    let conversationHistory = []
-    try {
-      conversationHistory = conversation ? JSON.parse(conversation) : []
-    } catch (e) {
-      console.error('Error parsing conversation history:', e)
-    }
-
-    // Build conversation context
-    const conversationContext = conversationHistory
-      .map(msg => `${msg.type === 'user' ? 'Student' : 'Tutor'}: ${msg.content}`)
-      .join('\n')
-
-    const combinedPrompt = buildPrompt(prompt || '', fileContent, conversationContext)
-
-    const response = await flashModel.generateContent(combinedPrompt)
-    const question = response.response.text().trim()
-    const validation = validateResponse(question, {})
-    
-    if (!validation.isValid) {
-      const retryPrompt = buildRetryPrompt(combinedPrompt)
-      const retryResp = await flashModel.generateContent(retryPrompt)
-      return res.json({ reply: retryResp.response.text().trim() })
-    } else {
-      // normal chat
-      res.json({ reply: question })
-    }
-  } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: err.message })
-  }
-})
-
+// ──────────────────────────────────────
+// 4.  Endpoints
+// ──────────────────────────────────────
 app.post('/api/context', upload.single('file'), async (req, res) => {
   try {
-    // 1. Extract form fields
-    const {
-      description = '',
-      priorKnowledge = '',
-      courseInfo = '',
-      notes = ''
-    } = req.body;
-
-    // 2. Parse the uploaded file, if any
+    const { description = '', priorKnowledge = '', courseInfo = '', notes = '' } = req.body;
     const fileText = await parseUploadedFile(req.file);
 
-    // 3. Build a little "extra context" blob
-    const extraContext = [
-      priorKnowledge && `Prior knowledge: ${priorKnowledge}`,
-      courseInfo     && `Course / context: ${courseInfo}`,
-      notes          && `Additional notes: ${notes}`,
-      fileText       && `\n---\n${fileText}`
-    ].filter(Boolean).join('\n');
-
-    // 4. Seed / reset session state
-    req.session.context = { description, priorKnowledge, courseInfo, notes, fileText };
-
-    // 5. Build the initial LLM prompt
-    const initialPrompt = buildPrompt(
+    const systemMsg = { type: 'system', content: req.session.system };
+    
+    // Use special context prompt that includes file content
+    const tutorIntroPrompt = buildContextPrompt(
       description,
       fileText,
-      extraContext
+      [priorKnowledge && `Prior knowledge: ${priorKnowledge}`,
+       courseInfo     && `Course: ${courseInfo}`,
+       notes          && `Notes: ${notes}`].filter(Boolean).join('\n')
     );
 
-    // 6. Fire off the tutor model for your first message
-    const aiResp = await flashModel.generateContent(initialPrompt);
-    const firstTutorMessage = aiResp.response
-      ? aiResp.response.text().trim()
-      : aiResp.choices?.[0]?.text?.trim() ??
-        'Hello! What would you like to explore today?';
+    const ai       = await flashModel.generateContent(tutorIntroPrompt);
+    const tutorMsg = { type: 'tutor', content: ai.response.text().trim() };
 
-    // 7. Initialize session conversation history
-    req.session.conversation = [
-      { type: 'tutor', content: firstTutorMessage }
-    ];
+    req.session.conversation = [systemMsg, tutorMsg];
+    req.session.context      = { description, priorKnowledge, courseInfo, notes, fileText };
+    
+    // Store essential context summary for future queries
+    req.session.contextSummary = `Problem: ${description}. ${fileText ? 'File uploaded with relevant content.' : ''}`;
 
-    // 8. Return both conversation and problemStatement to the client
-    res.json({
-      conversation: req.session.conversation,
-      problemStatement: description
-    });
-
+    res.json({ conversation: req.session.conversation.slice(1), problemStatement: description });
   } catch (err) {
-    console.error('[/api/context] error:', err);
+    console.error('[context]', err);
     res.status(500).json({ error: err.message });
   }
 });
 
 app.get('/api/conversation', (req, res) => {
   res.json({
-    conversation: req.session.conversation || [],
+    conversation: (req.session.conversation || []).slice(1),
     problemStatement: req.session.context?.description || ''
   });
 });
 
-// Testing endpoint: Parse file and return parsed text (no OpenAI)
-app.post('/api/parse', upload.single('file'), async (req, res) => {
-  const userInput = (prompt || '').trim()
-  try {
-    const parsedText = await parseUploadedFile(req.file)
-    res.json({ parsedText })
-  } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: err.message })
-  }
-})
-
-app.post('/api/hint', async (req, res) => {
-  const { prompt = '', conversation, problemStatement = '' } = req.body;
-
-  // 1) normalize conversationHistory
-  let conversationHistory = [];
-  if (Array.isArray(conversation)) {
-    conversationHistory = conversation;
-  } else if (typeof conversation === 'string') {
+function commonEndpointBuilder({ resultKey, extraPromptFactory }) {
+  return async (req, res) => {
     try {
-      conversationHistory = JSON.parse(conversation);
-    } catch {
-      conversationHistory = [];
+      const { prompt = '', conversation = [], problemStatement = '' } = req.body;
+      const history = normalizeConversation(conversation.length ? conversation : req.session.conversation);
+      const baseCtx = compressHistory(history);
+
+      // Use lightweight prompt without file content
+      const combined = buildPrompt(
+        prompt.trim(), 
+        '', // No file content in regular queries
+        extraPromptFactory(baseCtx, req.session.contextSummary || problemStatement, req.body)
+      );
+      
+      const ai   = await flashModel.generateContent(combined);
+      let  text  = ai.response.text().trim();
+
+      // special case: essential‑questions should return an array
+      if (resultKey === 'questions') {
+        text = text.split('\n').map(q => q.trim()).filter(Boolean).slice(0, 5);
+      }
+
+      if (resultKey === 'reply') {
+        req.session.conversation = [...history,
+          { type: 'user',  content: prompt.trim() },
+          { type: 'tutor', content: text }];
+      }
+
+      res.json({ [resultKey]: text });
+    } catch (err) {
+      console.error(`[${resultKey}]`, err);
+      res.status(500).json({ error: err.message });
     }
-  }
-
-  // 2) build context
-  const conversationContext = conversationHistory
-    .map(msg => `${msg.type === 'user' ? 'Student' : 'Tutor'}: ${msg.content}`)
-    .join('\n');
-
-  const extra = `
-Do not start with Hint:. Only give the hint text. Only give the student guidance related to what you have talked about with them. It's okay not to ask questions now. You should not ask any questions, but a hint. The hint should be a guiding fact/statement that helps the student think deeper about the problem. If you don't have enough information in the conversation, it's okay to say that.`;
-
-  const combinedPrompt = buildPrompt(
-    prompt.trim(),
-    '',
-    `${extra}\n\nContext: ${conversationContext}\n\nProblem: ${problemStatement}. Do not ask any questions.`
-  );
-
-  // 3) call your model
-  const response = await flashModel.generateContent(combinedPrompt);
-  const hint = response.choices?.[0]?.text?.trim() ??  
-               response.response?.text?.().trim() ??
-               'Sorry, no hint available right now.';
-
-  res.json({ hint });
-});
-
-app.post('/api/summary', async (req, res) => {
-  const { prompt = '', conversation, problemStatement = '' } = req.body;
-
-  // 1) normalize conversationHistory
-  let conversationHistory = [];
-  if (Array.isArray(conversation)) {
-    conversationHistory = conversation;
-  } else if (typeof conversation === 'string') {
-    try {
-      conversationHistory = JSON.parse(conversation);
-    } catch {
-      conversationHistory = [];
-    }
-  }
-
-  // 2) build context
-  const conversationContext = conversationHistory
-    .map(msg => `${msg.type === 'user' ? 'Student' : 'Tutor'}: ${msg.content}`)
-    .join('\n');
-
-  const extra = `
-Summarize the conversation so far. Make sure to tell the student what they seem to know and what they could work more on. Do not use any questions and give them a useful summary.
-`;
-  const combinedPrompt = buildPrompt(
-    prompt.trim(),
-    /* fileContent */ '',               // whoever parses req.file
-    `${conversationContext}\n\nProblem: ${problemStatement}${extra}`
-  );
-
-  // 3) call your model
-  const response = await flashModel.generateContent(combinedPrompt);
-  // NOTE: adjust this to whatever your model returns!
-  const summary = response.choices?.[0]?.text?.trim() ??  
-                  response.response?.text?.().trim() ??
-                  'Sorry, no summary right now.';
-
-  res.json({ summary });
+  };
 }
-);
 
-app.post('/api/chat/regenerate', async (req, res) => {
+app.post('/api/chat', upload.single('file'), async (req, res) => {
   try {
-    const { prompt, conversation, problemStatement, complexity } = req.body;
+    const { prompt = '', conversation = [], problemStatement = '' } = req.body;
+    const history = normalizeConversation(conversation.length ? conversation : req.session.conversation);
+    const baseCtx = compressHistory(history);
+
+    // Only parse file if one is uploaded with this specific message
+    const newFileContent = req.file ? await parseUploadedFile(req.file) : '';
     
-    // Build conversation context
-    const conversationContext = conversation
-      .map(msg => `${msg.type === 'user' ? 'Student' : 'Tutor'}: ${msg.content}`)
-      .join('\n');
-
-    // Add complexity instruction to the prompt
-    const complexityInstruction = {
-      'simpler': 'Please provide a simpler explanation with basic concepts and examples.',
-      'more_complex': 'Please provide a more detailed explanation with advanced concepts and deeper analysis.',
-      'different': 'Please explain this concept in a different way, using alternative examples or analogies.'
-    }[complexity] || '';
-
-    const combinedPrompt = buildPrompt(
-      prompt || '',
-      '', // No file content for regeneration
-      `${conversationContext}\n\nProblem: ${problemStatement}\n\n${complexityInstruction}`
+    const combined = buildPrompt(
+      prompt.trim(), 
+      newFileContent, // Only include new file content
+      baseCtx
     );
-
-    const response = await flashModel.generateContent(combinedPrompt);
-    const question = response.response.text().trim();
     
-    res.json({ reply: question });
+    const ai   = await flashModel.generateContent(combined);
+    const text = ai.response.text().trim();
+
+    req.session.conversation = [...history,
+      { type: 'user',  content: prompt.trim() },
+      { type: 'tutor', content: text }];
+
+    res.json({ reply: text });
   } catch (err) {
-    console.error(err);
+    console.error('[chat]', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.post('/api/essential-questions', async (req, res) => {
+app.post('/api/chat/regenerate', commonEndpointBuilder({
+  resultKey: 'reply',
+  extraPromptFactory: (ctx, prob, { complexity = '' }) => {
+    const map = { simpler: 'Simplify.', more_complex: 'Deepen.', different: 'Rephrase.' };
+    return `${ctx}\n\n${prob}\n\n${map[complexity] || ''}`;
+  }
+}));
+
+app.post('/api/hint', commonEndpointBuilder({
+  resultKey: 'hint',
+  extraPromptFactory: (ctx, prob) => `${ctx}\n\n${prob}\n\nGive a single guiding fact (no questions, no "Hint:" prefix).`
+}));
+
+app.post('/api/summary', commonEndpointBuilder({
+  resultKey: 'summary',
+  extraPromptFactory: (ctx, prob) => `${ctx}\n\n${prob}\n\nSummarize what the student knows and next steps (no questions).`
+}));
+
+app.post('/api/essential-questions', commonEndpointBuilder({
+  resultKey: 'questions',
+  extraPromptFactory: (ctx, prob) => `From the dialog below, produce 5 essential questions (newline‑sep, no bullets).\n\n${prob}\n\n${ctx}`
+}));
+
+app.post('/api/parse', upload.single('file'), async (req, res) => {
   try {
-    const { conversation = [], problemStatement = '' } = req.body;
-
-    // Normalize conversation history
-    let conversationHistory = [];
-    if (Array.isArray(conversation)) {
-      conversationHistory = conversation;
-    } else if (typeof conversation === 'string') {
-      try {
-        conversationHistory = JSON.parse(conversation);
-      } catch (e) {
-        conversationHistory = [];
-      }
-    }
-
-    // Build context from conversation
-    const conversationContext = conversationHistory
-      .map(msg => `${msg.type === 'user' ? 'Student' : 'Tutor'}: ${msg.content}`)
-      .join('\n');
-
-    const prompt = `
-Based on the following problem statement and conversation, generate exactly 5 essential questions that a student needs to be able to answer to demonstrate complete understanding of this topic. 
-
-These questions should:
-1. Cover the core concepts and principles
-2. Test practical application
-3. Ensure deep understanding rather than memorization
-4. Be specific to the topic being discussed
-5. Progress from basic to advanced understanding
-
-Problem Statement: ${problemStatement}
-
-Conversation Context:
-${conversationContext}
-
-Please provide exactly 5 questions, each on a new line, without numbering or bullet points. Focus on what the student truly needs to understand to master this topic.
-`;
-
-    const response = await flashModel.generateContent(prompt);
-    const questionsText = response.response?.text?.() || '';
-    
-    // Parse the questions (split by lines and filter out empty ones)
-    const questions = questionsText
-      .split('\n')
-      .map(q => q.trim())
-      .filter(q => q.length > 0)
-      .slice(0, 5); // Ensure we only get 5 questions
-
-    // Store questions in session for future reference
-    if (!req.session.essentialQuestions) {
-      req.session.essentialQuestions = questions;
-    }
-
-    res.json({ questions });
+    res.json({ parsedText: await parseUploadedFile(req.file) });
   } catch (err) {
-    console.error('Error generating essential questions:', err);
-    res.status(500).json({ error: 'Failed to generate essential questions' });
+    res.status(500).json({ error: err.message });
   }
 });
 
-const PORT = process.env.PORT || 3000
-const server = app.listen(PORT, () =>
-  console.log(`🚀  Server running on http://localhost:${PORT}`)
-)
+// ──────────────────────────────────────
+// 5.  Server & graceful shutdown
+// ──────────────────────────────────────
+const PORT   = process.env.PORT || 3000;
+const server = app.listen(PORT, () => console.log(`🚀  http://localhost:${PORT}`));
 
-function gracefulShutdown(signal) {
-  return () =>
-    server.close(err => {
-      if (err) {
-        console.error('Error during shutdown', err)
-        process.exitCode = 1
-      }
-      // If nodemon triggered the signal, tell it we're done
-      if (signal === 'SIGUSR2') {
-        process.kill(process.pid, 'SIGUSR2')
-      } else {
-        process.exit()
-      }
-    })
-}
-
-process.once('SIGINT',  gracefulShutdown('SIGINT'))   // ^C
-process.once('SIGTERM', gracefulShutdown('SIGTERM'))  // Docker/Heroku
-process.once('SIGUSR2', gracefulShutdown('SIGUSR2'))  // nodemon restart
+const gracefulShutdown = signal => () => server.close(err => {
+  if (err) { console.error('Shutdown error', err); process.exitCode = 1; }
+  if (signal === 'SIGUSR2') process.kill(process.pid, 'SIGUSR2');
+  else process.exit();
+});
+['SIGINT', 'SIGTERM', 'SIGUSR2'].forEach(sig => process.once(sig, gracefulShutdown(sig)));
