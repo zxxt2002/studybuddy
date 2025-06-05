@@ -16,7 +16,11 @@ export default function Home() {
     formData.append('notes', ctx.notes)
     if (ctx.file) formData.append('file', ctx.file)
 
-    await fetch('/api/context', { method: 'POST', body: formData })
+    await fetch('/api/context', { 
+      method: 'POST', 
+      credentials: 'include',
+      body: formData 
+    })
     navigate('/chat')
   }
 

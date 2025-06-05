@@ -10,6 +10,8 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { buildPrompt, buildRetryPrompt, buildContextPrompt } from '../utils/promptEngineer.js';
 import { validateResponse } from '../utils/responseValidator.js';
 import session from 'express-session';
+import bcrypt from 'bcrypt';
+import { v4 as uuidv4 } from 'uuid';
 
 // Constants & model setup
 const RULES = `Use markdown formatting always and useful formatting to enhance clarity. You are a Socratic tutor. Use short, question‑driven replies.`;
@@ -22,7 +24,151 @@ global.Headers = Headers;
 
 const app    = express();
 const upload = multer();
+
+// Configure CORS
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', 'http://localhost:5173');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
+// Configure session middleware first
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'socratictasecret',
+  resave: false,
+  saveUninitialized: true,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    sameSite: 'lax'
+  }
+}));
+
+// Then configure other middleware
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// In-memory user store (replace with database in production)
+const users = new Map();
+
+// Authentication middleware
+const requireAuth = (req, res, next) => {
+  if (!req.session || !req.session.userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+};
+
+// Authentication endpoints
+app.post('/api/register', async (req, res) => {
+  try {
+    const { username, password, email } = req.body;
+    
+    // Basic validation
+    if (!username || !password || !email) {
+      return res.status(400).json({ error: 'All fields are required' });
+    }
+
+    // Check if user already exists
+    if (Array.from(users.values()).some(u => u.username === username || u.email === email)) {
+      return res.status(400).json({ error: 'Username or email already exists' });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+    
+    // Create user
+    const userId = uuidv4();
+    const user = {
+      id: userId,
+      username,
+      email,
+      password: hashedPassword,
+      createdAt: new Date()
+    };
+    
+    users.set(userId, user);
+    
+    // Set session
+    req.session.userId = userId;
+    
+    res.json({ 
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email
+      }
+    });
+  } catch (err) {
+    console.error('[register]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    
+    // Find user
+    const user = Array.from(users.values()).find(u => u.username === username);
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    
+    // Verify password
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    
+    // Set session
+    req.session.userId = user.id;
+    
+    res.json({
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email
+      }
+    });
+  } catch (err) {
+    console.error('[login]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/logout', (req, res) => {
+  req.session.destroy(err => {
+    if (err) {
+      return res.status(500).json({ error: 'Could not log out' });
+    }
+    res.json({ message: 'Logged out successfully' });
+  });
+});
+
+app.get('/api/me', (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+  
+  const user = users.get(req.session.userId);
+  if (!user) {
+    return res.status(401).json({ error: 'User not found' });
+  }
+  
+  res.json({
+    user: {
+      id: user.id,
+      username: user.username,
+      email: user.email
+    }
+  });
+});
 
 // Utility helpers
 const normalizeConversation = raw => {
@@ -70,13 +216,6 @@ async function parseUploadedFile(file) {
   return '[Unsupported file type]';
 }
 
-// Session & middleware
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'socratictasecret',
-  resave: false,
-  saveUninitialized: true
-}));
-
 app.use((req, _res, next) => {
   if (!req.session.system) req.session.system = RULES;
   next();
@@ -97,7 +236,7 @@ app.post('/api/context', upload.single('file'), async (req, res) => {
       [priorKnowledge && `Prior knowledge: ${priorKnowledge}`,
        courseInfo     && `Course: ${courseInfo}`,
        notes          && `Notes: ${notes}`].filter(Boolean).join('\n'),
-       `Ask open-ended questions that target the student’s reasoning (“Why do you think that works?”) rather than their recall of facts. Then follow up by probing assumptions or implications (“If that’s true, what would we expect to see next?”) to guide them toward deeper insight without giving the answer away.`
+       `Ask open-ended questions that target the student's reasoning ("Why do you think that works?") rather than their recall of facts. Then follow up by probing assumptions or implications ("If that's true, what would we expect to see next?") to guide them toward deeper insight without giving the answer away.`
     );
 
     const ai       = await flashModel.generateContent(tutorIntroPrompt);
@@ -218,6 +357,15 @@ app.post('/api/parse', upload.single('file'), async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Protect existing endpoints
+app.use('/api/context', requireAuth);
+app.use('/api/chat', requireAuth);
+app.use('/api/chat/regenerate', requireAuth);
+app.use('/api/hint', requireAuth);
+app.use('/api/summary', requireAuth);
+app.use('/api/essential-questions', requireAuth);
+app.use('/api/parse', requireAuth);
 
 // Shutdown handling
 const PORT   = process.env.PORT || 3000;
