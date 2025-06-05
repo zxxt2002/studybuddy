@@ -7,25 +7,21 @@ import pdfjs from 'pdfjs-dist/legacy/build/pdf.js'
 const { getDocument } = pdfjs
 import { createWorker } from 'tesseract.js'
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import { buildPrompt, buildRetryPrompt, buildOutlinePrompt } from '../utils/promptEngineer.js'
+import { buildPrompt, buildRetryPrompt } from '../utils/promptEngineer.js'
 import { validateResponse } from '../utils/responseValidator.js'
 import session from 'express-session';
 
-const genAI        = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY) // onstructor
+const genAI        = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY) // constructor
 const flashModel   = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' }) // helper
-const proseModel   = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })       // for outlines
+const proseModel   = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })       // for generation
 // Set up global fetch and Headers
 global.fetch = fetch
 global.Headers = Headers
-
 
 // …
 
 const app = express()
 const upload = multer()
-// const openai = new OpenAI({
-//   apiKey: process.env.OPENAI_API_KEY
-// })
 
 app.use(express.json())
 
@@ -74,106 +70,6 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
     const fileContent = await parseUploadedFile(req.file)
     const userInput = (prompt || '').trim()
 
-    //initial outline request
-    if (!req.session.parts ) {
-      // Build the special one-shot outline prompt
-      const outlinePrompt = buildOutlinePrompt(
-        userInput,          // student's current question (may be empty)
-        fileContent,        // any uploaded/parsed file
-        /* conversationContext */ '',
-        problemStatement    // main problem/topic (may be empty)
-      )
-      const outlineResp   = await proseModel.generateContent(outlinePrompt)
-      const outlineText = outlineResp.response.text().trim()
-
-      // Split on any line of three or more dashes/equals
-      const parts = outlineText
-        .split(/(?:^|\n)(?=\s*(?:\*\*|__|#+)?\s*part\s+\d+\b)|^[-=]{3,}$/gim)
-        .map(p => p.trim())
-        .filter(Boolean)
-
-      // Store outline parts in session
-      req.session.parts     = parts
-      req.session.partIndex = 1
-      req.session.currentPart = parts[0]
-      req.session.currentIndex = 0
-
-        const content = parts[0]
-        const more = parts.length > 1
-      // Return full outline and ask to step through
-      console.log('→ entering outline mode', parts)
-      return res.json({
-        reply: 
-          `### Part 1 / ${parts.length}\n\n` +
-          `${content}\n\n` +
-          `Move on to the next part? (yes/no)`
-      })
-    }
-
-    //navigation through outline parts
-    if (req.session.parts) {
-      const answer = userInput.toLowerCase()
-      const yesTriggers = ['yes', 'next', 'move into', 'next part']
-      const wantsNext = yesTriggers.some(t => answer.includes(t))
-      if (wantsNext) {
-        const idx = req.session.partIndex
-        if (idx < req.session.parts.length) {
-          const content = req.session.parts[idx]
-          req.session.currentPart = content
-          req.session.currentIndex = idx
-          req.session.partIndex++
-          const more = req.session.partIndex < req.session.parts.length
-          const qPrompt = `
-You are a Socratic tutor. Based only on the conversation, ask a clear, guiding question that
-helps a student understand it better, without giving away the answer. Give the student feedback
-on their answers before asking the next question.
-
---- BEGIN PART ---
-${content}
---- END PART ---
-`
-          const qResp = await flashModel.generateContent(qPrompt)
-          const question = qResp.response.text().trim()
-          return res.json({
-            reply: 
-              `### Part ${idx + 1} / ${req.session.parts.length}\n\n` +
-              `${content}\n\n` +
-              `**Tutor:** ${question}` +
-              (more
-                ? '\n\nMove on to the next part? (yes/no)'
-                : '\n\nYou have completed all parts.')
-          })
-        }
-      }
-      //repond with no intention go on next part
-      if (req.session.currentPart) {
-        const idx        = req.session.currentIndex ?? 0
-        const content    = req.session.currentPart
-        const more       = req.session.partIndex < req.session.parts.length
-
-        const repeatPrompt = `
-You are still discussing the part below. Respond with guiding question that
-helps the student think deeper, without revealing the answer.
-
---- BEGIN PART ---
-${content}
---- END PART ---
-`
-        const qResp   = await flashModel.generateContent(repeatPrompt)
-        const question = qResp.response.text().trim()
-
-        return res.json({
-          reply:
-            `### Part ${idx + 1} / ${req.session.parts.length}\n\n` +
-            `**Tutor:** ${question}` +
-            (more
-              ? '\n\nMove on to the next part? (yes/no)'
-              : '\n\nYou have completed all parts.')
-        })
-      }
-
-    }
-
     // Parse conversation history if it exists
     let conversationHistory = []
     try {
@@ -187,43 +83,18 @@ ${content}
       .map(msg => `${msg.type === 'user' ? 'Student' : 'Tutor'}: ${msg.content}`)
       .join('\n')
 
-
-    //const combinedPrompt = buildPrompt(prompt || '', fileContent, conversationContext)
-    // If we're inside a part-by-part walk-through, give the model that part, too
-    const combinedPrompt = buildPrompt(
-      prompt || '',
-      fileContent,
-      conversationContext +
-        (req.session.currentPart
-          ? `\n\nCurrent outline part:\n${req.session.currentPart}`
-          : '')
-    )
-
+    const combinedPrompt = buildPrompt(prompt || '', fileContent, conversationContext)
 
     const response = await flashModel.generateContent(combinedPrompt)
     const question = response.response.text().trim()
-    const allowOutline = !!(req.session.parts && req.session.partIndex === 0)
-    const validation = validateResponse(question, { allowOutline })
+    const validation = validateResponse(question, {})
     
     if (!validation.isValid) {
       const retryPrompt = buildRetryPrompt(combinedPrompt)
       const retryResp = await flashModel.generateContent(retryPrompt)
       return res.json({ reply: retryResp.response.text().trim() })
     } else {
-      if (req.session.currentPart) {
-        const partNum   = (req.session.currentIndex ?? 0) + 1
-        const total     = req.session.parts.length
-        const moreParts = req.session.partIndex < total
-
-        return res.json({
-          reply:
-            `### Part ${partNum} / ${total}\n\n` +
-            `**Tutor:** ${question}` +
-            (moreParts ? '\n\nMove on to the next part?' : '\n\nYou have completed all parts.')
-        })
-      }
-
-      // normal chat outside outline-mode
+      // normal chat
       res.json({ reply: question })
     }
   } catch (err) {
@@ -245,7 +116,7 @@ app.post('/api/context', upload.single('file'), async (req, res) => {
     // 2. Parse the uploaded file, if any
     const fileText = await parseUploadedFile(req.file);
 
-    // 3. Build a little “extra context” blob
+    // 3. Build a little "extra context" blob
     const extraContext = [
       priorKnowledge && `Prior knowledge: ${priorKnowledge}`,
       courseInfo     && `Course / context: ${courseInfo}`,
@@ -255,10 +126,6 @@ app.post('/api/context', upload.single('file'), async (req, res) => {
 
     // 4. Seed / reset session state
     req.session.context = { description, priorKnowledge, courseInfo, notes, fileText };
-    // clear any outline‐mode state
-    req.session.parts = null;
-    req.session.partIndex = 0;
-    req.session.currentPart = null;
 
     // 5. Build the initial LLM prompt
     const initialPrompt = buildPrompt(
@@ -298,13 +165,6 @@ app.get('/api/conversation', (req, res) => {
   });
 });
 
-
-app.post('/api/outline/reset', (req, res) => {
-  req.session.parts = null;
-  req.session.partIndex = 0;
-  res.json({ success: true });
-});
-
 // Testing endpoint: Parse file and return parsed text (no OpenAI)
 app.post('/api/parse', upload.single('file'), async (req, res) => {
   const userInput = (prompt || '').trim()
@@ -342,13 +202,12 @@ Do not start with Hint:. Only give the hint text. Only give the student guidance
 
   const combinedPrompt = buildPrompt(
     prompt.trim(),
-    /* fileContent */ '',               // whoever parses req.file
+    '',
     `${extra}\n\nContext: ${conversationContext}\n\nProblem: ${problemStatement}. Do not ask any questions.`
   );
 
   // 3) call your model
   const response = await flashModel.generateContent(combinedPrompt);
-  // NOTE: adjust this to whatever your model returns!
   const hint = response.choices?.[0]?.text?.trim() ??  
                response.response?.text?.().trim() ??
                'Sorry, no hint available right now.';
@@ -486,56 +345,6 @@ Please provide exactly 5 questions, each on a new line, without numbering or bul
   } catch (err) {
     console.error('Error generating essential questions:', err);
     res.status(500).json({ error: 'Failed to generate essential questions' });
-  }
-});
-
-// Update the chat endpoint to consider essential questions
-app.post('/api/chat', upload.single('file'), async (req, res) => {
-  try {
-    const { prompt, conversation, problemStatement } = req.body
-    const fileContent = await parseUploadedFile(req.file)
-    const userInput = (prompt || '').trim()
-
-    // Parse conversation history
-    let conversationHistory = [];
-    try {
-      conversationHistory = Array.isArray(conversation) ? conversation : JSON.parse(conversation || '[]');
-    } catch (e) {
-      conversationHistory = [];
-    }
-
-    // Build conversation context including essential questions guidance
-    const conversationContext = conversationHistory
-      .map(msg => `${msg.type === 'user' ? 'Student' : 'Tutor'}: ${msg.content}`)
-      .join('\n');
-
-    let systemPrompt = buildPrompt(userInput, fileContent, conversationContext);
-
-    // Add essential questions guidance if they exist
-    if (req.session.essentialQuestions && req.session.essentialQuestions.length > 0) {
-      const questionsGuidance = `
- Essential Questions to Guide This Conversation:
-${req.session.essentialQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n')}
-
-As a Socratic tutor, naturally work toward helping the student answer these essential questions through your guidance. Don't mention these questions directly, but use them to guide your teaching approach.`;
-      
-      systemPrompt += `\n\n${questionsGuidance}`;
-    }
-
-    const response = await flashModel.generateContent(systemPrompt);
-    const tutorResponse = response.response?.text?.() || 'Sorry, I could not generate a response.';
-
-    // Store in session
-    if (!req.session.conversation) req.session.conversation = [];
-    req.session.conversation.push(
-      { type: 'user', content: userInput, timestamp: new Date().toLocaleTimeString() },
-      { type: 'tutor', content: tutorResponse, timestamp: new Date().toLocaleTimeString() }
-    );
-
-    res.json({ response: tutorResponse });
-  } catch (err) {
-    console.error('Chat error:', err);
-    res.status(500).json({ error: 'Failed to process chat request' });
   }
 });
 
