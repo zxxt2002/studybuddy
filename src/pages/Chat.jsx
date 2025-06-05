@@ -29,7 +29,9 @@ export default function Chat() {
 
     // Fetch initial seeded conversation (includes first tutor message)
     useEffect(() => {
-        fetch('/api/conversation')
+        fetch('/api/conversation', {
+            credentials: 'include'
+        })
           .then(res => res.json())
           .then(data => {
             setConversation(data.conversation || []);
@@ -62,7 +64,11 @@ export default function Chat() {
 
         // Only send new prompt; session holds past context
         try {
-            const res = await fetch('/api/chat', { method: 'POST', body: form });
+            const res = await fetch('/api/chat', { 
+                method: 'POST', 
+                credentials: 'include',
+                body: form 
+            });
             const data = await res.json();
             const assistantMessage = {
                 type: 'assistant',
@@ -88,6 +94,7 @@ export default function Chat() {
             const res = await fetch('/api/hint', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ problemStatement })
             });
             const data = await res.json();
@@ -107,6 +114,7 @@ export default function Chat() {
             const res = await fetch('/api/summary', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ problemStatement })
             });
             const data = await res.json();
@@ -124,6 +132,7 @@ export default function Chat() {
             const res = await fetch('/api/chat/regenerate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({
                     conversation: conversation.slice(0, messageIndex + 1),
                     problemStatement,
@@ -154,6 +163,7 @@ export default function Chat() {
             const response = await fetch('/api/essential-questions', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({
                     conversation,
                     problemStatement
