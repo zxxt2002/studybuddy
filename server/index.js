@@ -12,7 +12,7 @@ import { validateResponse } from '../utils/responseValidator.js';
 import session from 'express-session';
 
 // Constants & model setup
-const RULES = `You are a Socratic tutor. Use short, question‑driven replies. Never reveal chain‑of‑thought. Use markdown when helpful.`;
+const RULES = `Use markdown formatting always and useful formatting to enhance clarity. You are a Socratic tutor. Use short, question‑driven replies.`;
 
 const genAI      = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 const flashModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
@@ -26,6 +26,7 @@ app.use(express.json());
 
 // Utility helpers
 const normalizeConversation = raw => {
+  // Normalize conversation history to ensure consistent structure
   if (Array.isArray(raw)) return raw;
   if (typeof raw === 'string') {
     try { return JSON.parse(raw); } catch { /* ignore */ }
@@ -34,12 +35,14 @@ const normalizeConversation = raw => {
 };
 
 const compressHistory = (history, maxTurns = 2) => {
+  // Compress conversation history to the last few turns
   if (!history?.length) return '';
   const sys  = history[0]?.type === 'system' ? [history[0]] : [];
   const tail = history.slice(-maxTurns * 2);
-  return [...sys, ...tail]
+  return [...sys, ...tail] // Ensure we always have the system message first
     .map(m => `${m.type === 'user' ? 'S:' : m.type === 'tutor' ? 'T:' : 'SYS:'}${m.content}`)
     .join('\n');
+  // Format: S: for student, T: for tutor, SYS: for system
 };
 
 async function parseUploadedFile(file) {
@@ -93,7 +96,8 @@ app.post('/api/context', upload.single('file'), async (req, res) => {
       fileText,
       [priorKnowledge && `Prior knowledge: ${priorKnowledge}`,
        courseInfo     && `Course: ${courseInfo}`,
-       notes          && `Notes: ${notes}`].filter(Boolean).join('\n')
+       notes          && `Notes: ${notes}`].filter(Boolean).join('\n'),
+       `Ask open-ended questions that target the student’s reasoning (“Why do you think that works?”) rather than their recall of facts. Then follow up by probing assumptions or implications (“If that’s true, what would we expect to see next?”) to guide them toward deeper insight without giving the answer away.`
     );
 
     const ai       = await flashModel.generateContent(tutorIntroPrompt);
@@ -199,7 +203,7 @@ app.post('/api/hint', commonEndpointBuilder({
 
 app.post('/api/summary', commonEndpointBuilder({
   resultKey: 'summary',
-  extraPromptFactory: (ctx, prob) => `${ctx}\n\n${prob}\n\nSummarize what the student knows and next steps (no questions).`
+  extraPromptFactory: (ctx, prob) => `${ctx}\n\n${prob}\n\nThe user is asking for a summary. Use sections and headers like conversation so far, what you know, what you should study more, etc.. Summarize what the student knows and next steps (no questions).`
 }));
 
 app.post('/api/essential-questions', commonEndpointBuilder({
