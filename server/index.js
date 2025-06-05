@@ -428,6 +428,117 @@ app.post('/api/chat/regenerate', async (req, res) => {
   }
 });
 
+app.post('/api/essential-questions', async (req, res) => {
+  try {
+    const { conversation = [], problemStatement = '' } = req.body;
+
+    // Normalize conversation history
+    let conversationHistory = [];
+    if (Array.isArray(conversation)) {
+      conversationHistory = conversation;
+    } else if (typeof conversation === 'string') {
+      try {
+        conversationHistory = JSON.parse(conversation);
+      } catch (e) {
+        conversationHistory = [];
+      }
+    }
+
+    // Build context from conversation
+    const conversationContext = conversationHistory
+      .map(msg => `${msg.type === 'user' ? 'Student' : 'Tutor'}: ${msg.content}`)
+      .join('\n');
+
+    const prompt = `
+Based on the following problem statement and conversation, generate exactly 5 essential questions that a student needs to be able to answer to demonstrate complete understanding of this topic. 
+
+These questions should:
+1. Cover the core concepts and principles
+2. Test practical application
+3. Ensure deep understanding rather than memorization
+4. Be specific to the topic being discussed
+5. Progress from basic to advanced understanding
+
+Problem Statement: ${problemStatement}
+
+Conversation Context:
+${conversationContext}
+
+Please provide exactly 5 questions, each on a new line, without numbering or bullet points. Focus on what the student truly needs to understand to master this topic.
+`;
+
+    const response = await flashModel.generateContent(prompt);
+    const questionsText = response.response?.text?.() || '';
+    
+    // Parse the questions (split by lines and filter out empty ones)
+    const questions = questionsText
+      .split('\n')
+      .map(q => q.trim())
+      .filter(q => q.length > 0)
+      .slice(0, 5); // Ensure we only get 5 questions
+
+    // Store questions in session for future reference
+    if (!req.session.essentialQuestions) {
+      req.session.essentialQuestions = questions;
+    }
+
+    res.json({ questions });
+  } catch (err) {
+    console.error('Error generating essential questions:', err);
+    res.status(500).json({ error: 'Failed to generate essential questions' });
+  }
+});
+
+// Update the chat endpoint to consider essential questions
+app.post('/api/chat', upload.single('file'), async (req, res) => {
+  try {
+    const { prompt, conversation, problemStatement } = req.body
+    const fileContent = await parseUploadedFile(req.file)
+    const userInput = (prompt || '').trim()
+
+    // Parse conversation history
+    let conversationHistory = [];
+    try {
+      conversationHistory = Array.isArray(conversation) ? conversation : JSON.parse(conversation || '[]');
+    } catch (e) {
+      conversationHistory = [];
+    }
+
+    // Build conversation context including essential questions guidance
+    const conversationContext = conversationHistory
+      .map(msg => `${msg.type === 'user' ? 'Student' : 'Tutor'}: ${msg.content}`)
+      .join('\n');
+
+    let systemPrompt = buildPrompt(userInput, fileContent, conversationContext);
+
+    // Add essential questions guidance if they exist
+    if (req.session.essentialQuestions && req.session.essentialQuestions.length > 0) {
+      const questionsGuidance = `
+ Essential Questions to Guide This Conversation:
+${req.session.essentialQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n')}
+
+As a Socratic tutor, naturally work toward helping the student answer these essential questions through your guidance. Don't mention these questions directly, but use them to guide your teaching approach.`;
+      
+      systemPrompt += `\n\n${questionsGuidance}`;
+    }
+
+    const response = await flashModel.generateContent(systemPrompt);
+    const tutorResponse = response.response?.text?.() || 'Sorry, I could not generate a response.';
+
+    // Store in session
+    if (!req.session.conversation) req.session.conversation = [];
+    req.session.conversation.push(
+      { type: 'user', content: userInput, timestamp: new Date().toLocaleTimeString() },
+      { type: 'tutor', content: tutorResponse, timestamp: new Date().toLocaleTimeString() }
+    );
+
+    res.json({ response: tutorResponse });
+  } catch (err) {
+    console.error('Chat error:', err);
+    res.status(500).json({ error: 'Failed to process chat request' });
+  }
+});
+
 const PORT = process.env.PORT || 3000
 const server = app.listen(PORT, () =>
   console.log(`🚀  Server running on http://localhost:${PORT}`)

@@ -1,11 +1,12 @@
 // src/App.jsx
 import 'bootstrap/dist/css/bootstrap.min.css';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import HintPopup from '../components/HintPopup';
 import SummaryPopup from '../components/SummaryPopup';
 import OutlineControls from '../components/OutlineControls';       
 import { parseOutline } from '../utils/outlineUtils.js';
 import MessageReactions from '../components/MessageReactions';
+import EssentialQuestionsModal from '../components/EssentialQuestionsModal';
 
 export default function Chat() {
     const [prompt, setPrompt] = useState('');
@@ -21,6 +22,10 @@ export default function Chat() {
     const [summaryText, setSummaryText] = useState('');
     const [loadingSummary, setLoadingSummary] = useState(false);
 
+    // New state for essential questions
+    const [showQuestions, setShowQuestions] = useState(false);
+    const [essentialQuestions, setEssentialQuestions] = useState([]);
+    const [loadingQuestions, setLoadingQuestions] = useState(false);
 
     // Fetch initial seeded conversation (includes first tutor message)
     useEffect(() => {
@@ -138,6 +143,32 @@ export default function Chat() {
             });
         } catch (err) {
             console.error('Error regenerating response:', err);
+        }
+    };
+
+    const handleEssentialQuestions = async () => {
+        setShowQuestions(true);
+        setLoadingQuestions(true);
+        
+        try {
+            const response = await fetch('/api/essential-questions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    conversation,
+                    problemStatement
+                })
+            });
+
+            if (!response.ok) throw new Error('Failed to generate essential questions');
+            
+            const data = await response.json();
+            setEssentialQuestions(data.questions || []);
+        } catch (err) {
+            console.error('Error generating essential questions:', err);
+            setEssentialQuestions([]);
+        } finally {
+            setLoadingQuestions(false);
         }
     };
 
@@ -272,10 +303,19 @@ export default function Chat() {
                 <div className="col-auto">
                     <button className="btn btn-secondary" onClick={handleSummary}>{showSummary?"Hide summary":"Get summary"}</button>
                 </div>
+                <div className="col-auto">
+                    <button className="btn btn-info" onClick={handleEssentialQuestions}>Essential Questions</button>
+                </div>
             </div>
 
             <HintPopup show={showHint} onClose={()=>setShowHint(false)} hint={hintText} loading={loadingHint} />
             <SummaryPopup show={showSummary} onClose={()=>setShowSummary(false)} summary={summaryText} loading={loadingSummary} />
+            <EssentialQuestionsModal 
+                show={showQuestions} 
+                onClose={() => setShowQuestions(false)} 
+                questions={essentialQuestions} 
+                loading={loadingQuestions} 
+            />
         </div>
     );
 }
