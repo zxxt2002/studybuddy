@@ -1,12 +1,18 @@
 // src/pages/Home.jsx
 import React, { useState } from 'react'
-import { Button } from 'react-bootstrap'
+import { Button, Container } from 'react-bootstrap'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext.jsx'
 import ContextPopup from '../components/ContextPopup.jsx'
+import Login from '../components/Login.jsx'
+import Register from '../components/Register.jsx'
 
 export default function Home() {
-  const [show, setShow] = useState(false)
+  const [showContext, setShowContext] = useState(false)
+  const [showLogin, setShowLogin] = useState(false)
+  const [showRegister, setShowRegister] = useState(false)
   const navigate = useNavigate()
+  const { user } = useAuth()
 
   const handleSaveContext = async (ctx) => {
     const formData = new FormData()
@@ -20,18 +26,59 @@ export default function Home() {
     navigate('/chat')
   }
 
-  return (
-    <div className="d-flex flex-column justify-content-center align-items-center vh-100 text-center">
-      <img src="StudyBuddy.png" alt="Study Buddy Logo" className="logo" style={{ height: '200px' }}/>
-      <Button size="lg" onClick={() => setShow(true)}>
-        Provide Context &amp; Start Chat
-      </Button>
+  const handleSwitchToRegister = () => {
+    setShowLogin(false)
+    setShowRegister(true)
+  }
 
-      <ContextPopup
-        show={show}
-        onClose={() => setShow(false)}
-        onSave={handleSaveContext}
-      />
-    </div>
+  const handleSwitchToLogin = () => {
+    setShowRegister(false)
+    setShowLogin(true)
+  }
+
+  return (
+    <Container>
+      <div className="d-flex flex-column justify-content-center align-items-center vh-100 text-center">
+        <img src="StudyBuddy.png" alt="Study Buddy Logo" className="logo" style={{ height: '200px' }}/>
+        
+        {user ? (
+          // Authenticated user - show context setup
+          <Button size="lg" onClick={() => setShowContext(true)}>
+            Provide Context &amp; Start Chat
+          </Button>
+        ) : (
+          // Non-authenticated user - show login/register buttons
+          <div className="d-flex gap-3">
+            <Button size="lg" variant="primary" onClick={() => setShowLogin(true)}>
+              Login
+            </Button>
+            <Button size="lg" variant="outline-primary" onClick={() => setShowRegister(true)}>
+              Register
+            </Button>
+          </div>
+        )}
+
+        {/* Context Popup - only for authenticated users */}
+        {user && (
+          <ContextPopup
+            show={showContext}
+            onClose={() => setShowContext(false)}
+            onSave={handleSaveContext}
+          />
+        )}
+
+        {/* Authentication Modals */}
+        <Login 
+          show={showLogin} 
+          onClose={() => setShowLogin(false)}
+          onSwitchToRegister={handleSwitchToRegister}
+        />
+        <Register 
+          show={showRegister} 
+          onClose={() => setShowRegister(false)}
+          onSwitchToLogin={handleSwitchToLogin}
+        />
+      </div>
+    </Container>
   )
 }

@@ -10,6 +10,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 import { buildPrompt, buildRetryPrompt, buildOutlinePrompt } from '../utils/promptEngineer.js'
 import { validateResponse } from '../utils/responseValidator.js'
 import session from 'express-session';
+import bcrypt from 'bcryptjs';
 
 const genAI        = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY) // onstructor
 const flashModel   = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' }) // helper
@@ -26,6 +27,17 @@ const upload = multer()
 // const openai = new OpenAI({
 //   apiKey: process.env.OPENAI_API_KEY
 // })
+
+// In-memory user storage (replace with database in production)
+const users = new Map();
+
+// Middleware to check authentication
+const requireAuth = (req, res, next) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  next();
+};
 
 app.use(express.json())
 
@@ -68,7 +80,7 @@ app.use(session({
   saveUninitialized: true,
 }));
 
-app.post('/api/chat', upload.single('file'), async (req, res) => {
+app.post('/api/chat', requireAuth, upload.single('file'), async (req, res) => {
   try {
     const { prompt, conversation, problemStatement } = req.body
     const fileContent = await parseUploadedFile(req.file)
@@ -232,7 +244,7 @@ ${content}
   }
 })
 
-app.post('/api/context', upload.single('file'), async (req, res) => {
+app.post('/api/context', requireAuth, upload.single('file'), async (req, res) => {
   try {
     // 1. Extract form fields
     const {
@@ -245,7 +257,7 @@ app.post('/api/context', upload.single('file'), async (req, res) => {
     // 2. Parse the uploaded file, if any
     const fileText = await parseUploadedFile(req.file);
 
-    // 3. Build a little “extra context” blob
+    // 3. Build a little "extra context" blob
     const extraContext = [
       priorKnowledge && `Prior knowledge: ${priorKnowledge}`,
       courseInfo     && `Course / context: ${courseInfo}`,
@@ -255,7 +267,7 @@ app.post('/api/context', upload.single('file'), async (req, res) => {
 
     // 4. Seed / reset session state
     req.session.context = { description, priorKnowledge, courseInfo, notes, fileText };
-    // clear any outline‐mode state
+    // clear any outline-mode state
     req.session.parts = null;
     req.session.partIndex = 0;
     req.session.currentPart = null;
@@ -291,7 +303,7 @@ app.post('/api/context', upload.single('file'), async (req, res) => {
   }
 });
 
-app.get('/api/conversation', (req, res) => {
+app.get('/api/conversation', requireAuth, (req, res) => {
   res.json({
     conversation: req.session.conversation || [],
     problemStatement: req.session.context?.description || ''
@@ -317,7 +329,7 @@ app.post('/api/parse', upload.single('file'), async (req, res) => {
   }
 })
 
-app.post('/api/hint', async (req, res) => {
+app.post('/api/hint', requireAuth, async (req, res) => {
   const { prompt = '', conversation, problemStatement = '' } = req.body;
 
   // 1) normalize conversationHistory
@@ -356,7 +368,7 @@ Do not start with Hint:. Only give the hint text. Only give the student guidance
   res.json({ hint });
 });
 
-app.post('/api/summary', async (req, res) => {
+app.post('/api/summary', requireAuth, async (req, res) => {
   const { prompt = '', conversation, problemStatement = '' } = req.body;
 
   // 1) normalize conversationHistory
@@ -396,7 +408,7 @@ Summarize the conversation so far. Make sure to tell the student what they seem 
 }
 );
 
-app.post('/api/chat/regenerate', async (req, res) => {
+app.post('/api/chat/regenerate', requireAuth, async (req, res) => {
   try {
     const { prompt, conversation, problemStatement, complexity } = req.body;
     
@@ -426,6 +438,135 @@ app.post('/api/chat/regenerate', async (req, res) => {
     console.error(err);
     res.status(500).json({ error: err.message });
   }
+});
+
+// Authentication endpoints
+app.post('/api/register', async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+
+    // Validation
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'Username, email, and password are required' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+    }
+
+    // Check if user already exists
+    for (const [id, user] of users) {
+      if (user.email === email || user.username === username) {
+        return res.status(400).json({ error: 'User with this email or username already exists' });
+      }
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create user
+    const userId = Date.now().toString();
+    const newUser = {
+      id: userId,
+      username,
+      email,
+      password: hashedPassword,
+      createdAt: new Date()
+    };
+
+    users.set(userId, newUser);
+
+    // Log in user
+    req.session.userId = userId;
+    req.session.username = username;
+
+    res.json({
+      success: true,
+      user: {
+        id: userId,
+        username,
+        email
+      }
+    });
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // Validation
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    // Find user
+    let foundUser = null;
+    for (const [id, user] of users) {
+      if (user.email === email) {
+        foundUser = user;
+        break;
+      }
+    }
+
+    if (!foundUser) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Check password
+    const passwordMatch = await bcrypt.compare(password, foundUser.password);
+    if (!passwordMatch) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Log in user
+    req.session.userId = foundUser.id;
+    req.session.username = foundUser.username;
+
+    res.json({
+      success: true,
+      user: {
+        id: foundUser.id,
+        username: foundUser.username,
+        email: foundUser.email
+      }
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/logout', (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      console.error('Logout error:', err);
+      return res.status(500).json({ error: 'Failed to logout' });
+    }
+    res.json({ success: true });
+  });
+});
+
+app.get('/api/user', (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  const user = users.get(req.session.userId);
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  res.json({
+    user: {
+      id: user.id,
+      username: user.username,
+      email: user.email
+    }
+  });
 });
 
 const PORT = process.env.PORT || 3000
