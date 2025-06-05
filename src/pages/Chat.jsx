@@ -151,8 +151,11 @@ export default function Chat() {
 
     return (
         <div className="container py-4">
-            <div className="d-flex justify-content-between align-items-center mb-4">
-                <h1 className="mb-0">SocraticTA</h1>
+            <div className="d-flex justify-content-between align-items-baseline mb-4">
+                <div className="d-flex align-items-baseline">
+                    <img src="StudyBuddy.png" alt="Study Buddy Logo" className="logo" style={{ height: '200px' }} />
+                    <h4 className="text-info">{problemStatement}</h4>
+                </div>
                 <button
                     className="btn btn-outline-danger"
                     onClick={handleClearConversation}
@@ -161,26 +164,6 @@ export default function Chat() {
                     Clear Conversation
                 </button>
             </div>
-
-            {/* Problem Statement Section */}
-            <div className="mb-4">
-                <label htmlFor="problemStatement" className="form-label">Problem Statement</label>
-                <textarea
-                    id="problemStatement"
-                    className="form-control"
-                    rows={2}
-                    placeholder="Enter the main problem or topic you want to discuss..."
-                    value={problemStatement}
-                    onChange={e => setProblemStatement(e.target.value)}
-                    disabled={conversation.length > 0}
-                />
-            </div>
-
-            {problemStatement && (
-                <div className="alert alert-info mb-4">
-                    <strong>Current Problem:</strong> {problemStatement}
-                </div>
-            )}
 
             {/* Conversation history */}
             <div className="conversation-container mb-4"
@@ -215,7 +198,7 @@ export default function Chat() {
             </div>
 
             {/* Question textarea */}
-            <div className="mb-4">
+            <div className="mb-4 w-75">
                 <label htmlFor="prompt" className="form-label">Your Question</label>
                 <textarea
                     id="prompt"
