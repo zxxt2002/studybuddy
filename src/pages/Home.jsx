@@ -18,9 +18,14 @@ export default function Home() {
     formData.append('notes', ctx.notes);
     if (ctx.file) formData.append('file', ctx.file);
 
-    await fetch('/api/context', { method: 'POST', body: formData });
-    navigate('/chat');
-  };
+
+    await fetch('/api/context', { 
+      method: 'POST', 
+      credentials: 'include',
+      body: formData 
+    })
+    navigate('/chat')
+  }
 
   return (
     <Container fluid className="home-wrapper p-0">

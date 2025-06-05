@@ -1,10 +1,12 @@
 // src/App.jsx
 import 'bootstrap/dist/css/bootstrap.min.css';
 import React, { useState, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
 import HintPopup from '../components/HintPopup';
 import SummaryPopup from '../components/SummaryPopup';
 import MessageReactions from '../components/MessageReactions';
 import EssentialQuestionsModal from '../components/EssentialQuestionsModal';
+import DOMPurify from 'isomorphic-dompurify';
 
 export default function Chat() {
     const [prompt, setPrompt] = useState('');
@@ -27,7 +29,9 @@ export default function Chat() {
 
     // Fetch initial seeded conversation (includes first tutor message)
     useEffect(() => {
-        fetch('/api/conversation')
+        fetch('/api/conversation', {
+            credentials: 'include'
+        })
           .then(res => res.json())
           .then(data => {
             setConversation(data.conversation || []);
@@ -60,7 +64,11 @@ export default function Chat() {
 
         // Only send new prompt; session holds past context
         try {
-            const res = await fetch('/api/chat', { method: 'POST', body: form });
+            const res = await fetch('/api/chat', { 
+                method: 'POST', 
+                credentials: 'include',
+                body: form 
+            });
             const data = await res.json();
             const assistantMessage = {
                 type: 'assistant',
@@ -86,6 +94,7 @@ export default function Chat() {
             const res = await fetch('/api/hint', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ problemStatement })
             });
             const data = await res.json();
@@ -105,6 +114,7 @@ export default function Chat() {
             const res = await fetch('/api/summary', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ problemStatement })
             });
             const data = await res.json();
@@ -122,6 +132,7 @@ export default function Chat() {
             const res = await fetch('/api/chat/regenerate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({
                     conversation: conversation.slice(0, messageIndex + 1),
                     problemStatement,
@@ -152,6 +163,7 @@ export default function Chat() {
             const response = await fetch('/api/essential-questions', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({
                     conversation,
                     problemStatement
@@ -203,7 +215,7 @@ export default function Chat() {
                 </div>
             )}
 
-            {/* Conversation history */}
+            {/* Conversation history with markdown rendering */}
             <div className="conversation-container mb-4"
                  style={{ maxHeight: '500px', overflowY: 'auto' }}>
                 {conversation.map((message, index) => (
@@ -218,8 +230,33 @@ export default function Chat() {
                              marginLeft: message.type === 'user' ? 'auto' : '0',
                              marginRight: message.type === 'user' ? '0' : 'auto',
                          }}>
-                        <div className="message-content" style={{whiteSpace:'pre-line'}}>
-                            {message.content}
+                        <div className="message-content">
+                            {message.type === 'user' ? (
+                                <div style={{whiteSpace:'pre-line'}}>
+                                    {message.content}
+                                </div>
+                            ) : (
+                                <ReactMarkdown
+                                    components={{
+                                        // Custom styling for markdown elements
+                                        h1: ({children}) => <h5 className="mb-2">{children}</h5>,
+                                        h2: ({children}) => <h6 className="mb-2">{children}</h6>,
+                                        h3: ({children}) => <strong className="d-block mb-1">{children}</strong>,
+                                        p: ({children}) => <p className="mb-2">{children}</p>,
+                                        ul: ({children}) => <ul className="mb-2 ps-3">{children}</ul>,
+                                        ol: ({children}) => <ol className="mb-2 ps-3">{children}</ol>,
+                                        li: ({children}) => <li className="mb-1">{children}</li>,
+                                        code: ({children}) => <code className="bg-secondary text-light px-1 rounded">{children}</code>,
+                                        pre: ({children}) => <pre className="bg-dark text-light p-2 rounded overflow-auto">{children}</pre>,
+                                        blockquote: ({children}) => <blockquote className="border-start border-3 border-secondary ps-2 fst-italic">{children}</blockquote>,
+                                        strong: ({children}) => <strong>{children}</strong>,
+                                        em: ({children}) => <em>{children}</em>,
+                                        a: ({href, children}) => <a href={href} className="text-decoration-none" target="_blank" rel="noopener noreferrer">{children}</a>
+                                    }}
+                                >
+                                    {message.content}
+                                </ReactMarkdown>
+                            )}
                         </div>
                         {message.type === 'assistant' && (
                             <MessageReactions 
