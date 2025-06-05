@@ -12,9 +12,7 @@ import { buildPrompt, buildRetryPrompt, buildContextPrompt } from '../utils/prom
 import { validateResponse } from '../utils/responseValidator.js';
 import session from 'express-session';
 
-// ──────────────────────────────────────
-// 1.  Constants & model setup
-// ──────────────────────────────────────
+// Constants & model setup
 const RULES = `You are a Socratic tutor. Use short, question‑driven replies. Never reveal chain‑of‑thought. Use markdown when helpful.`;
 
 const genAI      = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
@@ -27,9 +25,7 @@ const app    = express();
 const upload = multer();
 app.use(express.json());
 
-// ──────────────────────────────────────
-// 2.  Utility helpers
-// ──────────────────────────────────────
+// Utility helpers
 const normalizeConversation = raw => {
   if (Array.isArray(raw)) return raw;
   if (typeof raw === 'string') {
@@ -72,9 +68,7 @@ async function parseUploadedFile(file) {
   return '[Unsupported file type]';
 }
 
-// ──────────────────────────────────────
-// 3.  Session & middleware
-// ──────────────────────────────────────
+// Session & middleware
 app.use(session({
   secret: process.env.SESSION_SECRET || 'socratictasecret',
   resave: false,
@@ -86,9 +80,7 @@ app.use((req, _res, next) => {
   next();
 });
 
-// ──────────────────────────────────────
-// 4.  Endpoints
-// ──────────────────────────────────────
+// Endpoints
 app.post('/api/context', upload.single('file'), async (req, res) => {
   try {
     const { description = '', priorKnowledge = '', courseInfo = '', notes = '' } = req.body;
@@ -224,9 +216,7 @@ app.post('/api/parse', upload.single('file'), async (req, res) => {
   }
 });
 
-// ──────────────────────────────────────
-// 5.  Server & graceful shutdown
-// ──────────────────────────────────────
+// Shutdown handling
 const PORT   = process.env.PORT || 3000;
 const server = app.listen(PORT, () => console.log(`🚀  http://localhost:${PORT}`));
 
