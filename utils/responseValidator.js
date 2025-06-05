@@ -2,6 +2,9 @@ const directAnswerIndicators = [
   'the answer is',
   'the answer to your question is',
   'the solution is',
+  'the answer would be',
+  'the answer is simply',
+  
 ]
 
 export function validateResponse(response, { allowOutline = false } = {}) {

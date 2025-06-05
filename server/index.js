@@ -1,4 +1,3 @@
-// server.js – token‑lean SocraticTA backend (questions array fix)
 import multer from 'multer';
 import dotenv from 'dotenv';
 dotenv.config();
