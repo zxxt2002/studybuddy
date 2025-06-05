@@ -1,4 +1,3 @@
-// src/App.jsx
 import 'bootstrap/dist/css/bootstrap.min.css';
 import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -6,7 +5,6 @@ import HintPopup from '../components/HintPopup';
 import SummaryPopup from '../components/SummaryPopup';
 import MessageReactions from '../components/MessageReactions';
 import EssentialQuestionsModal from '../components/EssentialQuestionsModal';
-import DOMPurify from 'isomorphic-dompurify';
 
 export default function Chat() {
     const [prompt, setPrompt] = useState('');
@@ -22,60 +20,84 @@ export default function Chat() {
     const [summaryText, setSummaryText] = useState('');
     const [loadingSummary, setLoadingSummary] = useState(false);
 
-    // New state for essential questions
     const [showQuestions, setShowQuestions] = useState(false);
     const [essentialQuestions, setEssentialQuestions] = useState([]);
+    const [questionProgress, setQuestionProgress] = useState([]);
     const [loadingQuestions, setLoadingQuestions] = useState(false);
 
-    // Fetch initial seeded conversation (includes first tutor message)
+    // Fetch initial conversation and essential questions
     useEffect(() => {
-        fetch('/api/conversation', {
-            credentials: 'include'
-        })
+        fetch('/api/conversation')
           .then(res => res.json())
           .then(data => {
             setConversation(data.conversation || []);
             setProblemStatement(data.problemStatement || '');
+            // Also fetch essential questions if they exist
+            if (data.conversation?.length > 0) {
+              fetchEssentialQuestions();
+            }
           })
           .catch(console.error);
-      }, []);
-      
+    }, []);
 
-    const handleClearConversation = () => {
-        // Optionally reset server conversation/session here
-        setConversation([]);
-        setProblemStatement('');
+    const fetchEssentialQuestions = async () => {
+        try {
+            const response = await fetch('/api/essential-questions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                setEssentialQuestions(data.questions || []);
+                setQuestionProgress(data.progress || []);
+            }
+        } catch (err) {
+            console.error('Error fetching essential questions:', err);
+        }
     };
 
+    const handleClearConversation = () => {
+        setConversation([]);
+        setProblemStatement('');
+        setEssentialQuestions([]);
+        setQuestionProgress([]);
+        // Navigate back to home instead of showing context popup
+        window.location.href = '/';
+    };
+
+    // Simpler approach - use the conversation returned by the server
     const handleSend = async () => {
         if (!prompt.trim()) return;
 
-        // Add user message locally
-        const userMessage = {
-            type: 'user',
-            content: prompt,
-            timestamp: new Date().toLocaleTimeString()
-        };
-        setConversation(prev => [...prev, userMessage]);
-
         const form = new FormData();
         form.append('prompt', prompt);
+        form.append('conversation', JSON.stringify(conversation));
+        form.append('problemStatement', problemStatement);
         if (file) form.append('file', file);
 
-        // Only send new prompt; session holds past context
         try {
-            const res = await fetch('/api/chat', { 
-                method: 'POST', 
-                credentials: 'include',
-                body: form 
-            });
+            const res = await fetch('/api/chat', { method: 'POST', body: form });
             const data = await res.json();
-            const assistantMessage = {
-                type: 'assistant',
-                content: data.error ? `Error: ${data.error}` : data.reply,
-                timestamp: new Date().toLocaleTimeString()
-            };
-            setConversation(prev => [...prev, assistantMessage]);
+            
+            if (data.conversation) {
+                // Use the conversation returned by the server
+                setConversation(data.conversation);
+            } else {
+                // Fallback: add messages manually if server doesn't return conversation
+                const userMessage = {
+                    type: 'user',
+                    content: prompt,
+                    timestamp: new Date().toLocaleTimeString()
+                };
+                const assistantMessage = {
+                    type: 'assistant',
+                    content: data.error ? `Error: ${data.error}` : data.reply,
+                    timestamp: new Date().toLocaleTimeString()
+                };
+                setConversation(prev => [...prev, userMessage, assistantMessage]);
+            }
         } catch (err) {
             const errorMessage = {
                 type: 'assistant',
@@ -84,101 +106,125 @@ export default function Chat() {
             };
             setConversation(prev => [...prev, errorMessage]);
         }
+        
         setPrompt('');
+        setFile(null);
     };
 
     const handleHint = async () => {
-        setShowHint(true);
+        if (showHint) {
+            setShowHint(false);
+            return;
+        }
+
         setLoadingHint(true);
         try {
-            const res = await fetch('/api/hint', {
+            const response = await fetch('/api/hint', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ problemStatement })
+                body: JSON.stringify({
+                    prompt,
+                    conversation,
+                    problemStatement
+                })
             });
-            const data = await res.json();
-            setHintText(data.hint || 'No hint available');
-        } catch (err) {
-            console.error(err);
-            setHintText('Error loading hint');
+
+            if (response.ok) {
+                const data = await response.json();
+                setHintText(data.hint || 'No hint available');
+                setShowHint(true);
+            }
+        } catch (error) {
+            console.error('Error getting hint:', error);
+            setHintText('Error getting hint');
         } finally {
             setLoadingHint(false);
         }
     };
 
     const handleSummary = async () => {
-        setShowSummary(true);
+        if (showSummary) {
+            setShowSummary(false);
+            return;
+        }
+
         setLoadingSummary(true);
         try {
-            const res = await fetch('/api/summary', {
+            const response = await fetch('/api/summary', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ problemStatement })
-            });
-            const data = await res.json();
-            setSummaryText(data.summary || 'No summary available');
-        } catch (err) {
-            console.error(err);
-            setSummaryText('Error loading summary');
-        } finally {
-            setLoadingSummary(false);
-        }
-    }
-
-    const handleRegenerate = async (messageIndex, complexity) => {
-        try {
-            const res = await fetch('/api/chat/regenerate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({
-                    conversation: conversation.slice(0, messageIndex + 1),
-                    problemStatement,
-                    complexity
-                })
-            });
-            const data = await res.json();
-
-            // Update the message with the new response
-            setConversation(prev => {
-                const newConversation = [...prev];
-                newConversation[messageIndex] = {
-                    ...newConversation[messageIndex],
-                    content: data.reply
-                };
-                return newConversation;
-            });
-        } catch (err) {
-            console.error('Error regenerating response:', err);
-        }
-    };
-
-    const handleEssentialQuestions = async () => {
-        setShowQuestions(true);
-        setLoadingQuestions(true);
-        
-        try {
-            const response = await fetch('/api/essential-questions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
                 body: JSON.stringify({
                     conversation,
                     problemStatement
                 })
             });
 
-            if (!response.ok) throw new Error('Failed to generate essential questions');
-            
-            const data = await response.json();
-            setEssentialQuestions(data.questions || []);
-        } catch (err) {
-            console.error('Error generating essential questions:', err);
-            setEssentialQuestions([]);
+            if (response.ok) {
+                const data = await response.json();
+                setSummaryText(data.summary || 'No summary available');
+                setShowSummary(true);
+            }
+        } catch (error) {
+            console.error('Error getting summary:', error);
+            setSummaryText('Error getting summary');
         } finally {
-            setLoadingQuestions(false);
+            setLoadingSummary(false);
+        }
+    };
+
+    const handleRegenerate = async (messageIndex, complexity) => {
+        try {
+            const response = await fetch('/api/chat/regenerate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    messageIndex,
+                    complexity,
+                    conversation,
+                    problemStatement
+                })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                const updatedConversation = [...conversation];
+                updatedConversation[messageIndex] = {
+                    ...updatedConversation[messageIndex],
+                    content: data.response
+                };
+                setConversation(updatedConversation);
+            }
+        } catch (error) {
+            console.error('Error regenerating message:', error);
+        }
+    };
+
+    const handleEssentialQuestions = async () => {
+        setShowQuestions(true);
+        // No loading needed since questions are already cached
+        setLoadingQuestions(false);
+    };
+
+    // Update the toggle handler to refresh conversation
+    const handleToggleProgress = async (questionIndex) => {
+        try {
+            const response = await fetch('/api/essential-questions/toggle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ questionIndex })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                setQuestionProgress(data.progress || []);
+                
+                // Update conversation if there's a new tutor message
+                if (data.conversation && data.conversation.length > conversation.length) {
+                    setConversation(data.conversation);
+                }
+            }
+        } catch (err) {
+            console.error('Error toggling progress:', err);
         }
     };
 
@@ -195,23 +241,16 @@ export default function Chat() {
                 </button>
             </div>
 
-            {/* Problem Statement Section */}
-            <div className="mb-4">
-                <label htmlFor="problemStatement" className="form-label">Problem Statement</label>
-                <textarea
-                    id="problemStatement"
-                    className="form-control"
-                    rows={2}
-                    placeholder="Enter the main problem or topic you want to discuss..."
-                    value={problemStatement}
-                    onChange={e => setProblemStatement(e.target.value)}
-                    disabled={conversation.length > 0}
-                />
-            </div>
-
             {problemStatement && (
-                <div className="alert alert-info mb-4">
-                    <strong>Current Problem:</strong> {problemStatement}
+                <div className="alert alert-info mb-4 d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>Current Problem:</strong> {problemStatement}
+                    </div>
+                    {essentialQuestions.length > 0 && (
+                        <small className="text-muted">
+                            Progress: {questionProgress.filter(Boolean).length}/{essentialQuestions.length} key concepts covered
+                        </small>
+                    )}
                 </div>
             )}
 
@@ -238,7 +277,6 @@ export default function Chat() {
                             ) : (
                                 <ReactMarkdown
                                     components={{
-                                        // Custom styling for markdown elements
                                         h1: ({children}) => <h5 className="mb-2">{children}</h5>,
                                         h2: ({children}) => <h6 className="mb-2">{children}</h6>,
                                         h3: ({children}) => <strong className="d-block mb-1">{children}</strong>,
@@ -310,8 +348,10 @@ export default function Chat() {
             <EssentialQuestionsModal 
                 show={showQuestions} 
                 onClose={() => setShowQuestions(false)} 
-                questions={essentialQuestions} 
-                loading={loadingQuestions} 
+                questions={essentialQuestions}
+                progress={questionProgress}
+                loading={loadingQuestions}
+                onToggleProgress={handleToggleProgress} // Add this for manual testing
             />
         </div>
     );

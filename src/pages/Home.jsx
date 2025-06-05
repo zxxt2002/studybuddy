@@ -73,7 +73,7 @@ export default function Home() {
             <div className="feature-content">
               <h5 className="feature-title">Socratic-Style Guidance</h5>
               <p className="feature-text">
-                Engage in back-and-forth dialogue—ask for simpler or more challenging questions, request hints, and deepen your understanding step by step.
+                Answer open-ended socratic questions: ask for simpler or more challenging questions, request hints, and deepen your understanding step by step.
               </p>
             </div>
           </div>

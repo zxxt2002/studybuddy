@@ -64,25 +64,112 @@ const requireAuth = (req, res, next) => {
   next();
 };
 
+// UTILITY FUNCTIONS - Add these before endpoints
+async function parseUploadedFile(file) {
+  if (!file) return '';
+
+  const mimeType = file.mimetype;
+
+  if (mimeType === 'application/pdf') {
+    try {
+      const loadingTask = getDocument({ data: file.buffer });
+      const pdfDocument = await loadingTask.promise;
+
+      let textContent = '';
+      const maxPages = Math.min(pdfDocument.numPages, 5); // Limit to 5 pages
+
+      for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+        const page = await pdfDocument.getPage(pageNum);
+        const text = await page.getTextContent();
+        const pageText = text.items.map(item => item.str).join(' ');
+        textContent += pageText + '\n';
+      }
+
+      return textContent.trim().substring(0, 3000); // Limit to 3000 chars
+    } catch (err) {
+      console.error('PDF parsing error:', err);
+      return '[PDF could not be parsed]';
+    }
+  } else if (mimeType.startsWith('image/')) {
+    try {
+      const worker = await createWorker('eng');
+      const { data: { text } } = await worker.recognize(file.buffer);
+      await worker.terminate();
+      return text.trim().substring(0, 1500); // Limit OCR text
+    } catch (err) {
+      console.error('Image OCR error:', err);
+      return '[Image could not be processed]';
+    }
+  } else if (mimeType.startsWith('text/')) {
+    return file.buffer.toString('utf-8').trim().substring(0, 2000); // Limit text files
+  } else {
+    return '[Unsupported file type]';
+  }
+}
+
+// Helper function to parse context response
+function parseContextResponse(responseText) {
+  const openingMatch = responseText.match(/\*\*OPENING_QUESTION:\*\*\s*\n(.*?)(?=\*\*ESSENTIAL_QUESTIONS:\*\*)/s);
+  const questionsMatch = responseText.match(/\*\*ESSENTIAL_QUESTIONS:\*\*\s*\n(.*?)$/s);
+  
+  const openingQuestion = openingMatch ? openingMatch[1].trim() : responseText;
+  
+  let essentialQuestions = [];
+  if (questionsMatch) {
+    essentialQuestions = questionsMatch[1]
+      .split('\n')
+      .map(line => line.replace(/^\d+\.\s*/, '').trim())
+      .filter(line => line.length > 0)
+      .slice(0, 5);
+  }
+  
+  return { openingQuestion, essentialQuestions };
+}
+
+// Utility helpers
+const normalizeConversation = raw => {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw); } catch { /* ignore */ }
+  }
+  return [];
+};
+
+const compressHistory = (history, maxTurns = 2) => {
+  if (!history?.length) return '';
+  const sys  = history[0]?.type === 'system' ? [history[0]] : [];
+  const tail = history.slice(-maxTurns * 2);
+  return [...sys, ...tail]
+    .map(m => `${m.type === 'user' ? 'S:' : m.type === 'tutor' ? 'T:' : 'SYS:'}${m.content}`)
+    .join('\n');
+};
+
+// Get next unaddressed question - KEEP ONLY THIS ONE
+function getNextEssentialQuestion(session) {
+  if (!session.essentialQuestions || !session.questionProgress) return null;
+  
+  const nextIndex = session.questionProgress.findIndex(addressed => !addressed);
+  return nextIndex !== -1 ? {
+    question: session.essentialQuestions[nextIndex],
+    index: nextIndex
+  } : null;
+}
+
 // Authentication endpoints
 app.post('/api/register', async (req, res) => {
   try {
     const { username, password, email } = req.body;
     
-    // Basic validation
     if (!username || !password || !email) {
       return res.status(400).json({ error: 'All fields are required' });
     }
 
-    // Check if user already exists
     if (Array.from(users.values()).some(u => u.username === username || u.email === email)) {
       return res.status(400).json({ error: 'Username or email already exists' });
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
     
-    // Create user
     const userId = uuidv4();
     const user = {
       id: userId,
@@ -93,8 +180,6 @@ app.post('/api/register', async (req, res) => {
     };
     
     users.set(userId, user);
-    
-    // Set session
     req.session.userId = userId;
     
     res.json({ 
@@ -114,19 +199,16 @@ app.post('/api/login', async (req, res) => {
   try {
     const { username, password } = req.body;
     
-    // Find user
     const user = Array.from(users.values()).find(u => u.username === username);
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     
-    // Verify password
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     
-    // Set session
     req.session.userId = user.id;
     
     res.json({
@@ -170,95 +252,52 @@ app.get('/api/me', (req, res) => {
   });
 });
 
-// Utility helpers
-const normalizeConversation = raw => {
-  // Normalize conversation history to ensure consistent structure
-  if (Array.isArray(raw)) return raw;
-  if (typeof raw === 'string') {
-    try { return JSON.parse(raw); } catch { /* ignore */ }
-  }
-  return [];
-};
-
-const compressHistory = (history, maxTurns = 2) => {
-  // Compress conversation history to the last few turns
-  if (!history?.length) return '';
-  const sys  = history[0]?.type === 'system' ? [history[0]] : [];
-  const tail = history.slice(-maxTurns * 2);
-  return [...sys, ...tail] // Ensure we always have the system message first
-    .map(m => `${m.type === 'user' ? 'S:' : m.type === 'tutor' ? 'T:' : 'SYS:'}${m.content}`)
-    .join('\n');
-  // Format: S: for student, T: for tutor, SYS: for system
-};
-
-async function parseUploadedFile(file) {
-  if (!file) return '';
-  const { mimetype } = file;
-  if (mimetype === 'application/pdf') {
-    const pdfDoc = await getDocument({ data: file.buffer }).promise;
-    let out = '';
-    for (let p = 1; p <= Math.min(pdfDoc.numPages, 5); p++) { // Limit to 5 pages
-      const page = await pdfDoc.getPage(p);
-      const txt  = await page.getTextContent();
-      out += txt.items.map(i => i.str).join(' ') + '\n';
-    }
-    return out.trim().substring(0, 3000); // Limit to 3000 chars
-  }
-  if (mimetype.startsWith('image/')) {
-    const worker = await createWorker('eng');
-    const { data: { text } } = await worker.recognize(file.buffer);
-    await worker.terminate();
-    return text.trim().substring(0, 1500); // Limit OCR text
-  }
-  if (mimetype.startsWith('text/')) {
-    return file.buffer.toString('utf-8').trim().substring(0, 2000); // Limit text files
-  }
-  return '[Unsupported file type]';
-}
-
-app.use((req, _res, next) => {
-  if (!req.session.system) req.session.system = RULES;
-  next();
-});
-
-// Endpoints
-app.post('/api/context', upload.single('file'), async (req, res) => {
+// Main endpoints
+app.post('/api/context', requireAuth, upload.single('file'), async (req, res) => {
   try {
     const { description = '', priorKnowledge = '', courseInfo = '', notes = '' } = req.body;
     const fileText = await parseUploadedFile(req.file);
 
-    const systemMsg = { type: 'system', content: req.session.system };
+    const systemMsg = { type: 'system', content: RULES };
     
-    // Use special context prompt that includes file content
     const tutorIntroPrompt = buildContextPrompt(
       description,
       fileText,
       [priorKnowledge && `Prior knowledge: ${priorKnowledge}`,
        courseInfo     && `Course: ${courseInfo}`,
-       notes          && `Notes: ${notes}`].filter(Boolean).join('\n'),
-       `Ask open-ended questions that target the student's reasoning ("Why do you think that works?") rather than their recall of facts. Then follow up by probing assumptions or implications ("If that's true, what would we expect to see next?") to guide them toward deeper insight without giving the answer away.`
+       notes          && `Notes: ${notes}`].filter(Boolean).join('\n')
     );
 
-    const ai       = await flashModel.generateContent(tutorIntroPrompt);
-    const tutorMsg = { type: 'tutor', content: ai.response.text().trim() };
+    const ai = await flashModel.generateContent(tutorIntroPrompt);
+    const responseText = ai.response.text().trim();
+    
+    const { openingQuestion, essentialQuestions } = parseContextResponse(responseText);
+    
+    const tutorMsg = { type: 'tutor', content: openingQuestion };
 
     req.session.conversation = [systemMsg, tutorMsg];
-    req.session.context      = { description, priorKnowledge, courseInfo, notes, fileText };
-    
-    // Store essential context summary for future queries
+    req.session.context = { description, priorKnowledge, courseInfo, notes, fileText };
+    req.session.essentialQuestions = essentialQuestions;
+    req.session.questionProgress = essentialQuestions.map(() => false);
     req.session.contextSummary = `Problem: ${description}. ${fileText ? 'File uploaded with relevant content.' : ''}`;
 
-    res.json({ conversation: req.session.conversation.slice(1), problemStatement: description });
+    res.json({ 
+      conversation: req.session.conversation.slice(1), 
+      problemStatement: description,
+      essentialQuestions: essentialQuestions 
+    });
   } catch (err) {
     console.error('[context]', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.get('/api/conversation', (req, res) => {
+app.get('/api/conversation', requireAuth, (req, res) => {
   res.json({
     conversation: (req.session.conversation || []).slice(1),
-    problemStatement: req.session.context?.description || ''
+    problemStatement: req.session.context?.description || '',
+    essentialQuestions: req.session.essentialQuestions || [],
+    questionProgress: req.session.questionProgress || []
   });
 });
 
@@ -269,17 +308,15 @@ function commonEndpointBuilder({ resultKey, extraPromptFactory }) {
       const history = normalizeConversation(conversation.length ? conversation : req.session.conversation);
       const baseCtx = compressHistory(history);
 
-      // Use lightweight prompt without file content
       const combined = buildPrompt(
         prompt.trim(), 
-        '', // No file content in regular queries
+        '',
         extraPromptFactory(baseCtx, req.session.contextSummary || problemStatement, req.body)
       );
       
       const ai   = await flashModel.generateContent(combined);
       let  text  = ai.response.text().trim();
 
-      // special case: essential‑questions should return an array
       if (resultKey === 'questions') {
         text = text.split('\n').map(q => q.trim()).filter(Boolean).slice(0, 5);
       }
@@ -298,22 +335,22 @@ function commonEndpointBuilder({ resultKey, extraPromptFactory }) {
   };
 }
 
-app.post('/api/chat', upload.single('file'), async (req, res) => {
+app.post('/api/chat', requireAuth, upload.single('file'), async (req, res) => {
   try {
     const { prompt = '', conversation = [], problemStatement = '' } = req.body;
     const history = normalizeConversation(conversation.length ? conversation : req.session.conversation);
     const baseCtx = compressHistory(history);
 
-    // Only parse file if one is uploaded with this specific message
     const newFileContent = req.file ? await parseUploadedFile(req.file) : '';
     
     const combined = buildPrompt(
       prompt.trim(), 
-      newFileContent, // Only include new file content
-      baseCtx
+      newFileContent,
+      baseCtx,
+      req.session.essentialQuestions || []
     );
     
-    const ai   = await flashModel.generateContent(combined);
+    const ai = await flashModel.generateContent(combined);
     const text = ai.response.text().trim();
 
     req.session.conversation = [...history,
@@ -327,7 +364,74 @@ app.post('/api/chat', upload.single('file'), async (req, res) => {
   }
 });
 
-app.post('/api/chat/regenerate', commonEndpointBuilder({
+app.post('/api/essential-questions', requireAuth, async (req, res) => {
+  try {
+    const questions = req.session.essentialQuestions || [];
+    const progress = req.session.questionProgress || [];
+    
+    res.json({ 
+      questions,
+      progress
+    });
+  } catch (err) {
+    console.error('Error getting essential questions:', err);
+    res.status(500).json({ error: 'Failed to get essential questions' });
+  }
+});
+
+app.post('/api/essential-questions/toggle', requireAuth, async (req, res) => {
+  try {
+    const { questionIndex } = req.body;
+    
+    if (!req.session.questionProgress) {
+      req.session.questionProgress = req.session.essentialQuestions?.map(() => false) || [];
+    }
+    
+    if (questionIndex >= 0 && questionIndex < req.session.questionProgress.length) {
+      const wasCompleted = req.session.questionProgress[questionIndex];
+      req.session.questionProgress[questionIndex] = !req.session.questionProgress[questionIndex];
+      
+      if (!wasCompleted && req.session.questionProgress[questionIndex]) {
+        const nextIncompleteIndex = req.session.questionProgress.findIndex(
+          (completed, index) => !completed && index > questionIndex
+        );
+        
+        let tutorMessage = '';
+        if (nextIncompleteIndex !== -1) {
+          const nextQuestion = req.session.essentialQuestions[nextIncompleteIndex];
+          tutorMessage = `Great progress! Let's move on to the next essential concept: ${nextQuestion}`;
+        } else {
+          const allComplete = req.session.questionProgress.every(completed => completed);
+          if (allComplete) {
+            tutorMessage = `Excellent! You've covered all the essential questions for this topic. What would you like to explore further or do you have any remaining questions?`;
+          }
+        }
+        
+        if (tutorMessage) {
+          req.session.conversation = req.session.conversation || [];
+          req.session.conversation.push({
+            type: 'tutor',
+            content: tutorMessage,
+            timestamp: new Date().toLocaleTimeString()
+          });
+        }
+      }
+      
+      console.log(`Manually toggled question ${questionIndex + 1} to ${req.session.questionProgress[questionIndex]}`);
+    }
+    
+    res.json({ 
+      questions: req.session.essentialQuestions || [],
+      progress: req.session.questionProgress || [],
+      conversation: (req.session.conversation || []).slice(1)
+    });
+  } catch (err) {
+    console.error('Error toggling question progress:', err);
+    res.status(500).json({ error: 'Failed to toggle question progress' });
+  }
+});
+
+app.post('/api/chat/regenerate', requireAuth, commonEndpointBuilder({
   resultKey: 'reply',
   extraPromptFactory: (ctx, prob, { complexity = '' }) => {
     const map = { simpler: 'Simplify.', more_complex: 'Deepen.', different: 'Rephrase.' };
@@ -335,37 +439,23 @@ app.post('/api/chat/regenerate', commonEndpointBuilder({
   }
 }));
 
-app.post('/api/hint', commonEndpointBuilder({
+app.post('/api/hint', requireAuth, commonEndpointBuilder({
   resultKey: 'hint',
   extraPromptFactory: (ctx, prob) => `${ctx}\n\n${prob}\n\nGive a single guiding fact (no questions, no "Hint:" prefix).`
 }));
 
-app.post('/api/summary', commonEndpointBuilder({
+app.post('/api/summary', requireAuth, commonEndpointBuilder({
   resultKey: 'summary',
   extraPromptFactory: (ctx, prob) => `${ctx}\n\n${prob}\n\nThe user is asking for a summary. Use sections and headers like conversation so far, what you know, what you should study more, etc.. Summarize what the student knows and next steps (no questions).`
 }));
 
-app.post('/api/essential-questions', commonEndpointBuilder({
-  resultKey: 'questions',
-  extraPromptFactory: (ctx, prob) => `From the dialog below, produce 5 essential questions (newline‑sep, no bullets).\n\n${prob}\n\n${ctx}`
-}));
-
-app.post('/api/parse', upload.single('file'), async (req, res) => {
+app.post('/api/parse', requireAuth, upload.single('file'), async (req, res) => {
   try {
     res.json({ parsedText: await parseUploadedFile(req.file) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
-
-// Protect existing endpoints
-app.use('/api/context', requireAuth);
-app.use('/api/chat', requireAuth);
-app.use('/api/chat/regenerate', requireAuth);
-app.use('/api/hint', requireAuth);
-app.use('/api/summary', requireAuth);
-app.use('/api/essential-questions', requireAuth);
-app.use('/api/parse', requireAuth);
 
 // Shutdown handling
 const PORT   = process.env.PORT || 3000;
