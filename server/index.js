@@ -135,10 +135,10 @@ const normalizeConversation = raw => {
   return [];
 };
 
-const compressHistory = (history, maxTurns = 2) => {
+const compressHistory = (history, maxTurns = 8) => { // Increased from 2 to 8
   if (!history?.length) return '';
   const sys  = history[0]?.type === 'system' ? [history[0]] : [];
-  const tail = history.slice(-maxTurns * 2);
+  const tail = history.slice(-maxTurns * 2); // This will keep last 16 messages instead of 4
   return [...sys, ...tail]
     .map(m => `${m.type === 'user' ? 'S:' : m.type === 'tutor' ? 'T:' : 'SYS:'}${m.content}`)
     .join('\n');
@@ -293,20 +293,30 @@ app.post('/api/context', requireAuth, upload.single('file'), async (req, res) =>
 });
 
 app.get('/api/conversation', requireAuth, (req, res) => {
+  const conversation = req.session.conversation || [];
+  const conversationWithoutSystem = conversation.slice(conversation[0]?.type === 'system' ? 1 : 0);
+  
+  console.log('GET /api/conversation - total messages:', conversation.length, 'returned:', conversationWithoutSystem.length);
+  
   res.json({
-    conversation: (req.session.conversation || []).slice(1),
+    conversation: conversationWithoutSystem,
     problemStatement: req.session.context?.description || '',
     essentialQuestions: req.session.essentialQuestions || [],
     questionProgress: req.session.questionProgress || []
   });
 });
 
+
+// Use different compression levels for different endpoints
+
 function commonEndpointBuilder({ resultKey, extraPromptFactory }) {
   return async (req, res) => {
     try {
       const { prompt = '', conversation = [], problemStatement = '' } = req.body;
       const history = normalizeConversation(conversation.length ? conversation : req.session.conversation);
-      const baseCtx = compressHistory(history);
+      
+      // Use more context for hints and summaries
+      const baseCtx = compressHistory(history, 6); // Keep last 12 messages
 
       const combined = buildPrompt(
         prompt.trim(), 
@@ -339,14 +349,19 @@ app.post('/api/chat', requireAuth, upload.single('file'), async (req, res) => {
   try {
     const { prompt = '', conversation = [], problemStatement = '' } = req.body;
     const history = normalizeConversation(conversation.length ? conversation : req.session.conversation);
-    const baseCtx = compressHistory(history);
+    
+    // Use full conversation context instead of compressed
+    const fullContext = history
+      .filter(m => m.type !== 'system') // Remove system message
+      .map(m => `${m.type === 'user' ? 'Student' : 'Tutor'}: ${m.content}`)
+      .join('\n');
 
     const newFileContent = req.file ? await parseUploadedFile(req.file) : '';
     
     const combined = buildPrompt(
       prompt.trim(), 
       newFileContent,
-      baseCtx,
+      fullContext, // Use full context instead of compressed
       req.session.essentialQuestions || []
     );
     

@@ -205,7 +205,8 @@ export default function Chat() {
         setLoadingQuestions(false);
     };
 
-    // Update the toggle handler to refresh conversation
+    // Fix the toggle handler to preserve conversation
+
     const handleToggleProgress = async (questionIndex) => {
         try {
             const response = await fetch('/api/essential-questions/toggle', {
@@ -264,57 +265,72 @@ export default function Chat() {
 
             {/* Conversation history with markdown rendering */}
             <div className="conversation-container mb-4"
-                 style={{ maxHeight: '500px', overflowY: 'auto' }}>
-                {conversation.map((message, index) => (
-                    <div key={index}
-                         className={`message mb-3 p-3 rounded ${
-                             message.type === 'user'
-                                 ? 'bg-primary text-white ms-auto'
-                                 : 'bg-light'
-                         }`}
-                         style={{
-                             maxWidth:'80%',
-                             marginLeft: message.type === 'user' ? 'auto' : '0',
-                             marginRight: message.type === 'user' ? '0' : 'auto',
-                         }}>
-                        <div className="message-content">
-                            {message.type === 'user' ? (
-                                <div style={{whiteSpace:'pre-line'}}>
-                                    {message.content}
-                                </div>
-                            ) : (
-                                <ReactMarkdown
-                                    components={{
-                                        h1: ({children}) => <h5 className="mb-2">{children}</h5>,
-                                        h2: ({children}) => <h6 className="mb-2">{children}</h6>,
-                                        h3: ({children}) => <strong className="d-block mb-1">{children}</strong>,
-                                        p: ({children}) => <p className="mb-2">{children}</p>,
-                                        ul: ({children}) => <ul className="mb-2 ps-3">{children}</ul>,
-                                        ol: ({children}) => <ol className="mb-2 ps-3">{children}</ol>,
-                                        li: ({children}) => <li className="mb-1">{children}</li>,
-                                        code: ({children}) => <code className="bg-secondary text-light px-1 rounded">{children}</code>,
-                                        pre: ({children}) => <pre className="bg-dark text-light p-2 rounded overflow-auto">{children}</pre>,
-                                        blockquote: ({children}) => <blockquote className="border-start border-3 border-secondary ps-2 fst-italic">{children}</blockquote>,
-                                        strong: ({children}) => <strong>{children}</strong>,
-                                        em: ({children}) => <em>{children}</em>,
-                                        a: ({href, children}) => <a href={href} className="text-decoration-none" target="_blank" rel="noopener noreferrer">{children}</a>
-                                    }}
-                                >
-                                    {message.content}
-                                </ReactMarkdown>
-                            )}
-                        </div>
-                        {message.type === 'assistant' && (
-                            <MessageReactions 
-                                onRegenerate={(complexity) => handleRegenerate(index, complexity)} 
-                            />
-                        )}
-                        <small className="text-muted d-block mt-1"
-                               style={{ fontSize:'0.8rem' }}>
-                            {message.timestamp}
-                        </small>
+                 style={{ 
+                   maxHeight: '60vh', // Use viewport height instead of fixed pixels
+                   minHeight: '300px', // Ensure minimum height
+                   overflowY: 'auto',
+                   border: '1px solid #dee2e6',
+                   borderRadius: '0.375rem',
+                   padding: '1rem',
+                   backgroundColor: '#f8f9fa'
+                 }}>
+                {conversation.length === 0 ? (
+                    <div className="text-center text-muted py-4">
+                        <p>No conversation yet. Start by asking a question!</p>
                     </div>
-                ))}
+                ) : (
+                    conversation.map((message, index) => (
+                        <div key={index}
+                             className={`message mb-3 p-3 rounded ${
+                                 message.type === 'user'
+                                     ? 'bg-primary text-white ms-auto'
+                                     : 'bg-white shadow-sm'
+                             }`}
+                             style={{
+                                 maxWidth:'85%',
+                                 marginLeft: message.type === 'user' ? 'auto' : '0',
+                                 marginRight: message.type === 'user' ? '0' : 'auto',
+                                 border: message.type === 'assistant' ? '1px solid #e9ecef' : 'none'
+                             }}>
+                            <div className="message-content">
+                                {message.type === 'user' ? (
+                                    <div style={{whiteSpace:'pre-line'}}>
+                                        {message.content}
+                                    </div>
+                                ) : (
+                                    <ReactMarkdown
+                                        components={{
+                                            h1: ({children}) => <h5 className="mb-2 text-primary">{children}</h5>,
+                                            h2: ({children}) => <h6 className="mb-2 text-secondary">{children}</h6>,
+                                            h3: ({children}) => <strong className="d-block mb-1">{children}</strong>,
+                                            p: ({children}) => <p className="mb-2">{children}</p>,
+                                            ul: ({children}) => <ul className="mb-2 ps-3">{children}</ul>,
+                                            ol: ({children}) => <ol className="mb-2 ps-3">{children}</ol>,
+                                            li: ({children}) => <li className="mb-1">{children}</li>,
+                                            code: ({children}) => <code className="bg-secondary text-light px-1 rounded">{children}</code>,
+                                            pre: ({children}) => <pre className="bg-dark text-light p-2 rounded overflow-auto">{children}</pre>,
+                                            blockquote: ({children}) => <blockquote className="border-start border-3 border-secondary ps-2 fst-italic">{children}</blockquote>,
+                                            strong: ({children}) => <strong className="text-primary">{children}</strong>,
+                                            em: ({children}) => <em>{children}</em>,
+                                            a: ({href, children}) => <a href={href} className="text-decoration-none" target="_blank" rel="noopener noreferrer">{children}</a>
+                                        }}
+                                    >
+                                        {message.content}
+                                    </ReactMarkdown>
+                                )}
+                            </div>
+                            {message.type === 'assistant' && (
+                                <MessageReactions 
+                                    onRegenerate={(complexity) => handleRegenerate(index, complexity)} 
+                                />
+                            )}
+                            <small className="text-muted d-block mt-1"
+                                   style={{ fontSize:'0.8rem' }}>
+                                {message.timestamp || 'Just now'}
+                            </small>
+                        </div>
+                    ))
+                )}
             </div>
 
             {/* Question textarea */}
